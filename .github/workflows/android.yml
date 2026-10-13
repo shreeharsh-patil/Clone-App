@@ -20,6 +20,8 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - name: Android SDK and NDK
         run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006'
       - name: Pinned stable Rust
@@ -62,6 +64,8 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'ndk;27.1.12297006'
       - run: rustup show && bash scripts/build-rust.sh && chmod +x gradlew
       - name: Enable KVM for emulator
@@ -102,6 +106,8 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - run: sdkmanager 'build-tools;36.0.0'
       - name: Sign release when credentials are available
         env:
