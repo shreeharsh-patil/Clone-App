@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 
 root=pathlib.Path(__file__).resolve().parent.parent
 metadata=json.loads(subprocess.check_output(['cargo','metadata','--manifest-path',str(root/'rust-core/Cargo.toml'),'--locked','--format-version','1'],text=True))
-out=['ParallelNest third-party runtime dependency notices','See LICENSE for original project Apache-2.0 terms.','']
+out=['Clone Apps third-party runtime dependency notices','See LICENSE for original project Apache-2.0 terms.','']
 for pkg in sorted(metadata['packages'],key=lambda x:x['name']):
     if pkg['name']=='parallelnest-core':continue
     out.append(f"Rust: {pkg['name']} {pkg['version']} | {pkg.get('license')} | {pkg.get('repository') or ''}")

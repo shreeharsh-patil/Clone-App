@@ -19,8 +19,9 @@ pub struct Instance {
     pub profile: i64,
     pub created: i64,
     pub last_launch: i64,
-    pub locked: bool,
     pub accent: u32,
+    pub number: u32,
+    pub engine: String,
 }
 pub fn valid_package(value: &str) -> bool {
     value.len() <= 255 && value.contains('.') && value.split('.').all(|part| {
@@ -32,7 +33,7 @@ pub fn valid_package(value: &str) -> bool {
 pub fn canonicalize(input: &str) -> Result<String, String> {
     if input.len() > MAX_BYTES { return Err("Metadata exceeds 1 MiB".into()); }
     let registry: Registry = serde_json::from_str(input).map_err(|_| "Invalid metadata schema")?;
-    if registry.schema != 1 || registry.instances.len() > 512 { return Err("Unsupported schema or instance limit".into()); }
+    if registry.schema != 2 || registry.instances.len() > 512 { return Err("Unsupported schema or instance limit".into()); }
     let mut ids = HashSet::new();
     let mut packages = HashSet::new();
     for row in &registry.instances {
@@ -42,7 +43,7 @@ pub fn canonicalize(input: &str) -> Result<String, String> {
         if !valid_package(&row.package) || row.name.trim().is_empty() || row.name.chars().count() > 80 || row.name.chars().any(char::is_control) {
             return Err("Invalid package or display name".into());
         }
-        if row.profile < 0 || row.created < 0 || row.last_launch < 0 || row.accent > 4 {
+        if row.profile < 0 || row.created < 0 || row.last_launch < 0 || row.accent > 4 || row.number != 1 || row.engine != "work_profile" {
             return Err("Invalid metadata value".into());
         }
         if !ids.insert(&row.id) || !packages.insert((&row.package, row.profile)) {
@@ -70,17 +71,19 @@ pub extern "system" fn Java_org_parallelnest_app_core_NativeCore_canonicalize(
 mod tests {
     use super::*;
     fn row() -> Instance {
-        Instance { id: "00112233-4455-6677-8899-aabbccddeeff".into(), package: "org.example.probe".into(), name: "Second account".into(), profile: 10, created: 1, last_launch: 0, locked: false, accent: 0 }
+        Instance { id: "00112233-4455-6677-8899-aabbccddeeff".into(), package: "org.example.probe".into(), name: "Second account".into(), profile: 10, created: 1, last_launch: 0, accent: 0, number: 1, engine: "work_profile".into() }
     }
-    fn json(rows: Vec<Instance>) -> String { serde_json::to_string(&Registry { schema: 1, instances: rows }).unwrap() }
+    fn json(rows: Vec<Instance>) -> String { serde_json::to_string(&Registry { schema: 2, instances: rows }).unwrap() }
     #[test] fn roundtrip() { let s=json(vec![row()]); assert_eq!(canonicalize(&s).unwrap(),s); }
     #[test] fn duplicate_package_rejected() { let mut b=row(); b.id="11112233-4455-6677-8899-aabbccddeeff".into(); assert!(canonicalize(&json(vec![row(),b])).is_err()); }
     #[test] fn duplicate_id_rejected() { let mut b=row(); b.package="org.other.app".into(); assert!(canonicalize(&json(vec![row(),b])).is_err()); }
     #[test] fn traversal_rejected() { assert!(!valid_package("../../data")); assert!(!valid_package("org..app")); assert!(!valid_package("org.1app")); }
     #[test] fn empty_and_control_name_rejected() { let mut r=row(); r.name=" \n".into(); assert!(canonicalize(&json(vec![r])).is_err()); }
     #[test] fn oversized_rejected() { assert!(canonicalize(&"x".repeat(MAX_BYTES+1)).is_err()); }
-    #[test] fn unknown_schema_rejected() { assert!(canonicalize("{\"schema\":2,\"instances\":[]}").is_err()); }
-    #[test] fn unknown_field_rejected() { assert!(canonicalize("{\"schema\":1,\"instances\":[],\"secret\":true}").is_err()); }
+    #[test] fn unknown_schema_rejected() { assert!(canonicalize("{\"schema\":3,\"instances\":[]}").is_err()); }
+    #[test] fn unknown_field_rejected() { assert!(canonicalize("{\"schema\":2,\"instances\":[],\"secret\":true}").is_err()); }
+    #[test] fn unsupported_engine_rejected() { let mut r=row();r.engine="virtual".into();assert!(canonicalize(&json(vec![r])).is_err()); }
+    #[test] fn unsupported_copy_number_rejected() { let mut r=row();r.number=2;assert!(canonicalize(&json(vec![r])).is_err()); }
     #[test] fn invalid_profile_rejected() { let mut r=row(); r.profile=-1; assert!(canonicalize(&json(vec![r])).is_err()); }
     #[test] fn different_profiles_allowed() { let mut b=row(); b.profile=11; b.id="11112233-4455-6677-8899-aabbccddeeff".into(); assert!(canonicalize(&json(vec![row(),b])).is_ok()); }
 }

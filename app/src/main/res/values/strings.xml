@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">ParallelNest</string>
+    <string name="app_name">Clone Apps</string>
     <string name="admin_description">Creates and manages a separate work profile. Can install and suspend apps in that profile. Personal app data stays in the personal profile.</string>
 </resources>

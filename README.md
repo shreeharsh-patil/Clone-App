@@ -1,6 +1,8 @@
-# ParallelNest
+# Clone Apps
 
 An original, free Android work-profile app manager written in Kotlin, Jetpack Compose and Rust. No ads, no analytics, no account with us, and no root requirement. Android provides a separate profile sandbox for a second installed copy of an application.
+
+[Transparent artistic logo and design prompt](docs/branding/README.md). The application ID remains `org.parallelnest.app` so the rename preserves existing installations.
 
 **Alpha software. One additional copy per package.** Virtual containers are disabled because none of the investigated engines passed the licensing, security and Android compatibility gates. See [feasibility/source review](docs/FEASIBILITY.md) and [executed test results](docs/TEST-RESULTS.md). A successful build alone is not a stable-release certification.
 
@@ -8,25 +10,26 @@ An original, free Android work-profile app manager written in Kotlin, Jetpack Co
 
 APKs and complete corresponding source are published to [GitHub Releases](https://github.com/shreeharsh-patil/Clone-App/releases). For local builds, install `app/build/outputs/apk/debug/app-debug.apk` with Android's installer or `adb install -r`. The debug APK supports ARM64 phones and x86_64 emulators. The separate `isolation-probe/build/outputs/apk/debug/isolation-probe-debug.apk` is a first-party test app; it is not bundled in the manager.
 
-Allow installation from your chosen file browser when Android asks. Open ParallelNest, read the profile explanation, check consent, and accept Android's profile setup screen. Then select **Add app** and confirm installation in the work profile. Work app accounts begin empty. To verify separation, save different values in the original and work copies of Nest Isolation Probe.
+Allow installation from your chosen file browser when Android asks. Open Clone Apps, select **Add App**, choose installed apps, and tap **Install (N)**. When no managed profile is connected, read the explanation, check consent and accept Android's profile setup screen before continuing installation. Work app accounts begin empty. To verify separation, save different values in the original and work copies of Clone Apps Probe.
 
-An existing work profile is never replaced. If another controller owns your profile, keep using it or make a deliberate choice in Android settings; removing a profile permanently deletes all of its app data. ParallelNest does not implement a profile-wipe button. Pause/resume a work profile in Android settings or Quick Settings.
+An existing work profile is never replaced. If another controller owns your profile, keep using it or make a deliberate choice in Android settings; removing a profile permanently deletes all of its app data. Clone Apps does not implement a profile-wipe button. Pause/resume a work profile in Android settings or Quick Settings.
 
-Debug signing is for evaluation. Debug builds permit work-profile ADB debugging when system USB debugging is enabled, for isolation tests; production builds retain Android's default profile debugging restriction. APK updates require the same signing certificate. Do not replace the signing identity of an installed profile controller. An **unsigned** release APK is not installable until signed; production signing secrets are described below.
+The v0.2.0-alpha release APK is signed with a persistent private release key. See [release signing and update identity](docs/SIGNING.md). This certificate differs from the earlier debug alpha, so it cannot update that installation; existing debug users can use the separately provided debug APK. Debug builds permit work-profile ADB debugging when system USB debugging is enabled, for isolation tests; release builds retain Android's default profile debugging restriction. APK updates require the same signing certificate. Do not replace the signing identity of an installed profile controller.
 
 ## What is implemented
 
 - System-managed provisioning, permission explanations and explicit consent.
 - Installed launcher-app discovery using scoped package-visibility queries.
 - Base/split APK installation into the managed profile, authenticated cross-profile launching, profile-app synchronization, suspend/resume and work-only uninstallation.
-- Search, lazy grid/list dashboard, original app icons, custom names, icon framing, Android launcher shortcuts, timestamps and profile status.
-- Rename, Android work-app information/storage controls, deletion confirmation, lock before each manager launch and automatic relocking.
-- Biometric/device-credential authentication plus optional PIN fallback. Salted PBKDF2-HMAC-SHA256 verifier, Android Keystore AES-GCM encryption and retry delays. No plaintext PIN persistence.
-- Light/dark/system themes, Material You dynamic colors, edge-to-edge insets and native Compose navigation.
+- Compact three-column dashboard, ordinary Add App tile, original app icons where Android exposes them, numbered badges and long-press actions.
+- Searchable installed-app selection, multi-select Install count, real sequential progress and cancellation of remaining queue entries.
+- Rename, icon framing, Android work-app information/storage controls, deletion confirmation, launcher shortcuts, timestamps and profile status.
+- Dark/system themes with blue and violet accents, edge-to-edge insets and native Compose navigation.
+- Room instance metadata and durable pending creation records, DataStore preferences and Android Keystore encryption for the authenticated profile bridge.
 - Manager-only metadata/settings backup and restore through Android's file picker, privacy screen, compatibility diagnostics, diagnostic export and complete dependency license viewer.
 - Native Rust schema/identifier/package validation, bounded import, strict serialization and duplicate-environment rejection, with tests and two JNI ABIs.
 
-The app lock protects launches through ParallelNest and its shortcuts. It cannot block a work app launched through another launcher or notification. Suspending an application uses Android's package suspension policy; it is not an unrestricted force-stop facility. Android may refuse suspension of critical packages. Launching through ParallelNest resumes a suspended work app.
+Suspending an application uses Android's package suspension policy; it is not an unrestricted force-stop facility. Android may refuse suspension of critical packages. Launching through Clone Apps resumes a suspended work app.
 
 ## Architecture
 
@@ -34,7 +37,8 @@ The app lock protects launches through ParallelNest and its shortcuts. It cannot
 flowchart TD
     UI[Native Compose screens] --> VM[Lifecycle ViewModel and StateFlow]
     VM --> E[CloneEngine interface]
-    VM --> R[Transactional DataStore registry]
+    VM --> R[Transactional Room registry]
+    VM --> S[DataStore preferences]
     R --> JNI[Rust JNI metadata validation]
     E --> W[WorkProfileEngine]
     W --> P[Android consent and provisioning]
@@ -47,7 +51,7 @@ flowchart TD
 
 The personal-profile registry is the single source of truth for manager metadata. Actual displayed installations are reconciled with profile-specific LauncherApps records; removed apps/profiles are not presented as runnable copies. Registry entries survive app updates; profile serial IDs prevent mapping old entries onto a new profile. Stale metadata can remain for recovery without showing a nonexistent installation. Each package/profile pair appears once.
 
-Small codebase, two Gradle modules: `app` and `isolation-probe`. Inside `app`, `core` owns models/persistence/security, `engine` owns provisioning/installation/launching and `ui` owns Compose screens and ViewModel. Rust validates metadata rather than duplicating Android lifecycle APIs. DataStore is sufficient for the bounded registry and avoids a second Room database needing reconciliation. Native calls, discovery, serialization and APK streaming run off the UI thread. There are no persistent background services or polling loops.
+Gradle modules are `app`, `core`, `clone-engine`, `ui` and the separate first-party `isolation-probe`; `rust-core` contains the JNI library. `core` owns models, Room persistence, preferences and bridge encryption. `clone-engine` owns provisioning, installation and launching; `ui` owns Compose screens and the ViewModel. Legacy metadata migrates into Room while preserving instance IDs and custom names. Rust validates metadata rather than duplicating Android lifecycle APIs. Native calls, discovery, serialization and APK streaming run off the UI thread. The manager has no persistent background service or polling loop.
 
 ## Compatibility
 
@@ -90,7 +94,7 @@ Set `ANDROID_HOME`; optionally set `ANDROID_NDK_HOME` to the pinned NDK. The she
 
 ## Tests and reproducibility
 
-Run `./gradlew :app:connectedDebugAndroidTest` with a disposable emulator/test device. Set `ANDROID_SERIAL` when multiple devices are connected. Instrumentation exercises native schema rejection, Keystore encryption, PIN verification/retry delay, forged bridge rejection and the native Compose interface. Rust tests cover duplicate IDs/environment pairs, traversal/malformed packages, schema/field rejection, size bounds, invalid profile and serialization.
+Run `./gradlew :app:connectedDebugAndroidTest` with a disposable emulator/test device. Set `ANDROID_SERIAL` when multiple devices are connected. Instrumentation exercises native schema rejection, Keystore encryption, forged bridge rejection, Bluetooth permission/scanning lifecycle, temporary URI sharing grants and the native Compose interface. Rust tests cover duplicate IDs/environment pairs, traversal/malformed packages, schema/field rejection, size bounds, invalid profile and serialization.
 
 The manual isolation protocol and execution evidence are in [docs/TEST-RESULTS.md](docs/TEST-RESULTS.md). Only the first-party probe's debug private preferences are inspected during tests; the production manager never extracts guest private data. Screenshots below come from the actual running emulator, not mockups.
 
@@ -102,19 +106,19 @@ The manual isolation protocol and execution evidence are in [docs/TEST-RESULTS.m
 | --- | --- |
 | ![Personal persistent value](docs/screenshots/probe-personal.png) | ![Independent work persistent value](docs/screenshots/probe-work.png) |
 
-![Actual manager dashboard](docs/screenshots/dashboard.png)
+![Actual Clone Apps dashboard](docs/screenshots/home-v2.png)
 
 ## Bluetooth devices and file sharing
 
-Open **Bluetooth** from the toolbar or **Settings → Bluetooth devices & file sharing**. No work profile is required for this feature. Grant ParallelNest's **Nearby devices** permission to see paired devices, scan for discoverable classic Bluetooth devices and request Android pairing. Scans stop after 15 seconds or when the screen leaves the foreground. Use **Turn on Bluetooth** for Android's enable-consent prompt and **Bluetooth settings** for accessory configuration. Device names and addresses are held only in memory; no background service, internet upload or location permission is used. BLE/GATT interactions and accessory-specific services belong in the relevant accessory app.
+Open **Bluetooth** from the toolbar or **Settings → Bluetooth devices & file sharing**. No work profile is required for this feature. Grant Clone Apps's **Nearby devices** permission to see paired devices, scan for discoverable classic Bluetooth devices and request Android pairing. Scans stop after 15 seconds or when the screen leaves the foreground. Use **Turn on Bluetooth** for Android's enable-consent prompt and **Bluetooth settings** for accessory configuration. Device names and addresses are held only in memory; no background service, internet upload or location permission is used. BLE/GATT interactions and accessory-specific services belong in the relevant accessory app.
 
-**Choose a file to send** opens Android's document picker, then the standard share menu. Choose **Bluetooth** and the receiving device. Android handles file transfer/progress; the receiver must support Bluetooth file sharing and the OS must expose a compatible sharing destination. Only the selected content URI receives a temporary read grant; ParallelNest does not copy private clone data, request broad storage access or retain the file URI.
+**Choose a file to send** opens Android's document picker, then the standard share menu. Choose **Bluetooth** and the receiving device. Android handles file transfer/progress; the receiver must support Bluetooth file sharing and the OS must expose a compatible sharing destination. Only the selected content URI receives a temporary read grant; Clone Apps does not copy private clone data, request broad storage access or retain the file URI.
 
 ![Native Bluetooth manager](docs/screenshots/bluetooth-manager.png)
 
 ## Bluetooth in cloned apps
 
-ParallelNest allows outgoing Bluetooth sharing in its own work profile, including after an app update. Android otherwise blocks that sharing by default for managed profiles ([UserManager policy](https://developer.android.com/reference/android/os/UserManager#DISALLOW_BLUETOOTH_SHARING)). It does not change a different administrator's restrictions.
+Clone Apps allows outgoing Bluetooth sharing in its own work profile, including after an app update. Android otherwise blocks that sharing by default for managed profiles ([UserManager policy](https://developer.android.com/reference/android/os/UserManager#DISALLOW_BLUETOOTH_SHARING)). It does not change a different administrator's restrictions.
 
 Turn Bluetooth on and pair your device in Android settings. Resume the work profile and launch the work copy, then grant that app's **Nearby devices** permission when it asks. Each work app requests the Bluetooth permissions its features need; Android documents scanning, advertising and connecting separately ([Bluetooth permissions](https://developer.android.com/develop/connectivity/bluetooth/bt-permissions)). Open **Work app info & storage → Permissions** if permission was previously denied. A frozen app must be resumed before using Bluetooth.
 
@@ -137,7 +141,7 @@ Without these secrets, releases provide an installable **debug** APK and a clear
 
 ## Privacy, limits and licensing
 
-No INTERNET, QUERY_ALL_PACKAGES, broad storage, accessibility-service, VPN, usage-access or notification-listener permission. Package installation/deletion and biometric permissions are justified by explicit user actions. The manager cannot back up arbitrary app data, read guest private caches, guarantee third-party account acceptance, evade Integrity checks, host unlimited virtual copies or silently take over an existing controller.
+No INTERNET, QUERY_ALL_PACKAGES, broad storage, accessibility-service, VPN, usage-access or notification-listener permission. Package installation/deletion and Nearby devices permissions are justified by explicit user actions. The manager cannot back up arbitrary app data, read guest private caches, guarantee third-party account acceptance, evade Integrity checks, host unlimited virtual copies or silently take over an existing controller.
 
 Original project: Apache-2.0. [NOTICE](NOTICE), [license distribution](licenses/README.md), [complete runtime dependency notices](app/src/main/assets/third-party-notices.txt). Island and Shelter informed the source review; no GPL or proprietary engine was copied or linked. BlackBox/NewBlackbox/VirtualApp are not included. Changes to dependencies must regenerate and review the notices before release.
 

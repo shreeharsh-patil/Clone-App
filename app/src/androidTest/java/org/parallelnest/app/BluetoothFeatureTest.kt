@@ -18,7 +18,9 @@ class BluetoothFeatureTest {
     @SuppressLint("MissingPermission")
     @Test fun managerRequestsNearbyConsentAndStopsItsScanWhenLeaving() {
         device.executeShellCommand("am start --user 0 -n org.parallelnest.app/.MainActivity")
-        val open=device.wait(Until.findObject(By.text("Bluetooth")),15_000)
+        val menu=device.wait(Until.findObject(By.desc("More options")),15_000)
+        assertNotNull(menu);menu.click()
+        val open=device.wait(Until.findObject(By.text("Bluetooth")),5_000)
         assertNotNull("Bluetooth is available without creating a work profile",open)
         open.click()
         assertTrue(device.wait(Until.hasObject(By.text("Send a file")),10_000))
@@ -34,11 +36,11 @@ class BluetoothFeatureTest {
             allow.click()
         }
         assertTrue(device.wait(Until.hasObject(By.text(if(adapter.isEnabled) "Bluetooth is on" else "Bluetooth is off")),10_000))
-        listOf(Manifest.permission.BLUETOOTH_CONNECT,Manifest.permission.BLUETOOTH_SCAN).forEach {
-            assertEquals(it,PackageManager.PERMISSION_GRANTED,context.checkSelfPermission(it))
-        }
+        assertEquals(PackageManager.PERMISSION_GRANTED,context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT))
         if(adapter.isEnabled) {
             device.wait(Until.findObject(By.text("Scan for devices")),5_000)!!.click()
+            device.wait(Until.findObject(By.text("Allow")),1_000)?.click()
+            assertEquals(PackageManager.PERMISSION_GRANTED,context.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN))
             val stop=device.wait(Until.findObject(By.text("Stop scan")),3_000)
             if(stop!=null) {
                 device.pressBack()

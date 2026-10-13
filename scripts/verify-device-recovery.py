@@ -10,7 +10,7 @@ serial=os.environ.get('ANDROID_SERIAL','emulator-5554')
 def call(*parts):return subprocess.check_output([adb,'-s',serial,*parts],text=True)
 def check_values():
     users=call('shell','pm','list','users')
-    work_ids=[int(x) for x in re.findall(r'UserInfo\{(\d+):ParallelNest:',users)]
+    work_ids=[int(x) for x in re.findall(r'UserInfo\{(\d+):(?:Clone Apps|ParallelNest):',users)]
     assert len(work_ids)==1,users
     for user,value in ((0,'PERSONAL_SENTINEL_2026'),(work_ids[0],'WORK_SENTINEL_2026')):
         xml=call('shell','run-as','org.parallelnest.probe','--user',str(user),'cat','shared_prefs/probe.xml')

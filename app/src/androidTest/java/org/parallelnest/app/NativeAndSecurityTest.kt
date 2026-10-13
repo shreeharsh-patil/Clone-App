@@ -20,15 +20,9 @@ class NativeAndSecurityTest {
     }
     @Test fun forgedBridgeCommandRejected() { assertFalse(BridgeAuth.verify(context,Intent().putExtra("op","delete").putExtra("package","org.example.probe"))) }
     @Test fun forgedBridgeReplyRejected() { assertFalse(BridgeAuth.verifyReply(context,Intent().putExtra("success",true).putExtra("profile",10L).putExtra("reply_mac",ByteArray(32)))) }
-    @Test fun keystoreEncryptsAndPinVerifiesWithRetryDelay() {
+    @Test fun keystoreEncryptsProvisioningMaterial() {
         val store=SecureStore(context)
         store.put("test",byteArrayOf(1,2,3))
         assertArrayEquals(byteArrayOf(1,2,3),store.get("test"))
-        store.setPin("654321".toCharArray())
-        assertTrue(store.checkPin("654321".toCharArray()))
-        repeat(5){assertFalse(store.checkPin("000000".toCharArray()))}
-        assertFalse(store.checkPin("654321".toCharArray()))
-        store.setPin("123456".toCharArray())
-        assertTrue("A newly authenticated PIN change clears the old retry delay",store.checkPin("123456".toCharArray()))
     }
 }

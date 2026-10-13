@@ -12,8 +12,8 @@ android {
         applicationId = "org.parallelnest.app"
         minSdk = 33
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.1.0-alpha.2"
+        versionCode = 3
+        versionName = "0.2.0-alpha"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
@@ -41,9 +41,9 @@ android {
     lint { abortOnError = true }
 }
 dependencies {
+    implementation(project(":ui"))
     implementation(platform("androidx.compose:compose-bom:2026.03.00"))
     implementation("androidx.activity:activity-compose:1.11.0")
-    implementation("androidx.fragment:fragment-ktx:1.8.9")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
@@ -51,7 +51,6 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0")
     implementation("androidx.navigation:navigation-compose:2.9.8")
     implementation("androidx.datastore:datastore-preferences:1.2.1")
-    implementation("androidx.biometric:biometric:1.1.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     testImplementation("junit:junit:4.13.2")
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
@@ -71,7 +70,9 @@ tasks.register("verifyNativeLibraries") {
 tasks.named("preBuild").configure { dependsOn("verifyNativeLibraries") }
 tasks.register("runtimeCoordinates") {
     doLast {
-        val coords = configurations.getByName("releaseRuntimeClasspath").resolvedConfiguration.resolvedArtifacts.map { it.moduleVersion.id.toString() }.distinct().sorted()
+        val coords = configurations.getByName("releaseRuntimeClasspath").incoming.resolutionResult.allComponents.mapNotNull {
+            (it.id as? org.gradle.api.artifacts.component.ModuleComponentIdentifier)?.let { id -> "${id.group}:${id.module}:${id.version}" }
+        }.distinct().sorted()
         val output = rootProject.layout.buildDirectory.file("runtime-coordinates.json").get().asFile
         output.parentFile.mkdirs()
         output.writeText(coords.joinToString(",", "[", "]") { "\"$it\"" })

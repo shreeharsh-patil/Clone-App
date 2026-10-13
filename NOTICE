@@ -9,4 +9,4 @@ are not incorporated. No virtual-container library or proprietary APK is bundled
 Runtime dependency notices, versions and license texts are included in
 app/src/main/assets/third-party-notices.txt and licenses/.
 Android SDK/platform behavior is provided by the user's Android operating system.
-The first-party Nest Isolation Probe is licensed under the same Apache-2.0 license.
+The first-party Clone Apps Probe is licensed under the same Apache-2.0 license.

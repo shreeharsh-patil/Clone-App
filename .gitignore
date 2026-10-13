@@ -12,3 +12,4 @@ artifacts/
 *.log
 **/__pycache__/
 .avd/
+.signing/

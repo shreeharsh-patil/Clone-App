@@ -1,4 +1,4 @@
-ParallelNest third-party runtime dependency notices
+Clone Apps third-party runtime dependency notices
 See LICENSE for original project Apache-2.0 terms.
 
 Rust: bytes 1.12.1 | MIT | https://github.com/tokio-rs/bytes
@@ -6396,96 +6396,137 @@ DEALINGS IN THE SOFTWARE.
 Maven: androidx.activity:activity-compose:1.11.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.activity:activity-ktx:1.11.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.activity:activity:1.11.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
-Maven: androidx.annotation:annotation-experimental:1.4.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.annotation:annotation-experimental:1.5.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.annotation:annotation-jvm:1.9.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
-Maven: androidx.appcompat:appcompat-resources:1.2.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
-Maven: androidx.appcompat:appcompat:1.2.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.annotation:annotation:1.9.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.arch.core:core-common:2.2.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.arch.core:core-runtime:2.2.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.autofill:autofill:1.0.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
-Maven: androidx.biometric:biometric:1.1.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.collection:collection-jvm:1.5.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.collection:collection-ktx:1.5.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.collection:collection:1.5.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.animation:animation-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.animation:animation-core-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.animation:animation-core:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.animation:animation:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.foundation:foundation-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.foundation:foundation-layout-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.foundation:foundation-layout:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.foundation:foundation:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.material3:material3-android:1.4.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.material3:material3:1.4.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.material:material-ripple-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.material:material-ripple:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.runtime:runtime-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.runtime:runtime-annotation-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.runtime:runtime-annotation:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.runtime:runtime-retain-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.runtime:runtime-retain:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.runtime:runtime-saveable-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.runtime:runtime-saveable:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.runtime:runtime:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.ui:ui-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.ui:ui-geometry-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.ui:ui-geometry:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.ui:ui-graphics-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.ui:ui-graphics:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.ui:ui-text-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.ui:ui-text:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.ui:ui-tooling-preview-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.ui:ui-tooling-preview:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.ui:ui-unit-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.ui:ui-unit:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.compose.ui:ui-util-android:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.ui:ui-util:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose.ui:ui:1.10.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.compose:compose-bom:2026.03.00 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.concurrent:concurrent-futures:1.1.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.core:core-ktx:1.16.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.core:core-viewtree:1.0.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.core:core:1.16.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
-Maven: androidx.cursoradapter:cursoradapter:1.0.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.customview:customview-poolingcontainer:1.0.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
-Maven: androidx.customview:customview:1.0.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.datastore:datastore-android:1.2.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.datastore:datastore-core-android:1.2.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.datastore:datastore-core-okio-jvm:1.2.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.datastore:datastore-core-okio:1.2.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.datastore:datastore-core:1.2.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.datastore:datastore-preferences-android:1.2.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.datastore:datastore-preferences-core-android:1.2.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.datastore:datastore-preferences-core:1.2.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.datastore:datastore-preferences-external-protobuf:1.2.1 | BSD-3-Clause https://opensource.org/licenses/BSD-3-Clause
 Maven: androidx.datastore:datastore-preferences-proto:1.2.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.datastore:datastore-preferences:1.2.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.datastore:datastore:1.2.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.documentfile:documentfile:1.0.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
-Maven: androidx.drawerlayout:drawerlayout:1.0.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.dynamicanimation:dynamicanimation:1.0.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.emoji2:emoji2:1.4.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
-Maven: androidx.fragment:fragment-ktx:1.8.9 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
-Maven: androidx.fragment:fragment:1.8.9 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.graphics:graphics-path:1.0.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.interpolator:interpolator:1.0.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.legacy:legacy-support-core-utils:1.0.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.lifecycle:lifecycle-common-java8:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.lifecycle:lifecycle-common-jvm:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.lifecycle:lifecycle-common:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.lifecycle:lifecycle-livedata-core-ktx:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.lifecycle:lifecycle-livedata-core:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.lifecycle:lifecycle-livedata:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.lifecycle:lifecycle-process:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.lifecycle:lifecycle-runtime-android:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.lifecycle:lifecycle-runtime-compose-android:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.lifecycle:lifecycle-runtime-compose:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.lifecycle:lifecycle-runtime-ktx-android:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.lifecycle:lifecycle-runtime-ktx:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.lifecycle:lifecycle-runtime:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.lifecycle:lifecycle-viewmodel-android:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.lifecycle:lifecycle-viewmodel-compose-android:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.lifecycle:lifecycle-viewmodel-compose:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.lifecycle:lifecycle-viewmodel-ktx:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.lifecycle:lifecycle-viewmodel-savedstate-android:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.lifecycle:lifecycle-viewmodel-savedstate:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.lifecycle:lifecycle-viewmodel:2.10.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.loader:loader:1.0.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.localbroadcastmanager:localbroadcastmanager:1.0.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.navigation:navigation-common-android:2.9.8 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.navigation:navigation-common:2.9.8 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.navigation:navigation-compose-android:2.9.8 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.navigation:navigation-compose:2.9.8 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.navigation:navigation-runtime-android:2.9.8 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.navigation:navigation-runtime:2.9.8 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.print:print:1.0.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.profileinstaller:profileinstaller:1.4.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.room:room-common-jvm:2.8.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.room:room-common:2.8.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.room:room-ktx:2.8.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.room:room-runtime-android:2.8.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.room:room-runtime:2.8.5 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.savedstate:savedstate-android:1.4.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.savedstate:savedstate-compose-android:1.4.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.savedstate:savedstate-compose:1.4.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.savedstate:savedstate-ktx:1.4.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.savedstate:savedstate:1.4.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.sqlite:sqlite-android:2.6.2 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.sqlite:sqlite-framework-android:2.6.2 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.sqlite:sqlite-framework:2.6.2 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.sqlite:sqlite:2.6.2 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.startup:startup-runtime:1.1.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.tracing:tracing:1.2.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.transition:transition:1.6.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
-Maven: androidx.vectordrawable:vectordrawable-animated:1.1.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
-Maven: androidx.vectordrawable:vectordrawable:1.1.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.versionedparcelable:versionedparcelable:1.1.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
-Maven: androidx.viewpager:viewpager:1.0.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.window:window-core-android:1.5.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: androidx.window:window-core:1.5.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: androidx.window:window:1.5.0 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: com.google.guava:listenablefuture:1.0 | Apache-2.0 https://www.apache.org/licenses/LICENSE-2.0
 Maven: com.squareup.okio:okio-jvm:3.9.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: com.squareup.okio:okio:3.9.1 | The Apache Software License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: org.jetbrains.kotlin:kotlin-stdlib:2.2.21 | Apache-2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2 | Apache-2.0 https://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: org.jetbrains.kotlinx:kotlinx-coroutines-bom:1.10.2 | Apache-2.0 https://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2 | Apache-2.0 https://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: org.jetbrains.kotlinx:kotlinx-coroutines-core:1.10.2 | Apache-2.0 https://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: org.jetbrains.kotlinx:kotlinx-serialization-bom:1.7.3 | The Apache Software License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: org.jetbrains.kotlinx:kotlinx-serialization-core-jvm:1.7.3 | The Apache Software License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: org.jetbrains.kotlinx:kotlinx-serialization-core:1.7.3 | The Apache Software License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: org.jetbrains.kotlinx:kotlinx-serialization-json-jvm:1.7.3 | The Apache Software License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0.txt
+Maven: org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3 | The Apache Software License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: org.jetbrains:annotations:23.0.0 | The Apache Software License, Version 2.0 https://www.apache.org/licenses/LICENSE-2.0.txt
 Maven: org.jspecify:jspecify:1.0.0 | The Apache License, Version 2.0 http://www.apache.org/licenses/LICENSE-2.0.txt
 

@@ -33,24 +33,24 @@ jobs:
       - name: Android tests, lint and APKs
         run: |
           chmod +x gradlew
-          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease :isolation-probe:assembleDebug --console=plain
+          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:lintRelease :core:lintDebug :clone-engine:lintDebug :ui:lintDebug :isolation-probe:lintDebug :app:assembleDebug :app:assembleRelease :isolation-probe:assembleDebug --console=plain
       - name: Verify APK native contents and page alignment
         run: python3 scripts/verify-apk.py app/build/outputs/apk/debug/app-debug.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: ParallelNest-debug-and-unsigned-release
+          name: Clone-Apps-debug-and-unsigned-release
           path: |
             app/build/outputs/apk/**/*.apk
             isolation-probe/build/outputs/apk/debug/*.apk
             app/build/reports/
       - name: Assemble corresponding source archive
         if: startsWith(github.ref, 'refs/tags/v')
-        run: git archive --format=zip --output=ParallelNest-source.zip HEAD
+        run: git archive --format=zip --output=Clone-Apps-source.zip HEAD
       - uses: actions/upload-artifact@v4
         if: startsWith(github.ref, 'refs/tags/v')
         with:
-          name: ParallelNest-source
-          path: ParallelNest-source.zip
+          name: Clone-Apps-source
+          path: Clone-Apps-source.zip
   instrumented:
     runs-on: ubuntu-24.04
     strategy:
@@ -100,11 +100,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: ParallelNest-debug-and-unsigned-release
+          name: Clone-Apps-debug-and-unsigned-release
           path: artifacts
       - uses: actions/download-artifact@v4
         with:
-          name: ParallelNest-source
+          name: Clone-Apps-source
           path: artifacts/source
       - uses: actions/setup-java@v4
         with:
@@ -123,8 +123,8 @@ jobs:
         run: |
           if [ -n "$KEYSTORE_B64" ]; then
             printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/release.jks"
-            "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:STORE_PASS --key-pass env:KEY_PASS --out artifacts/ParallelNest-release.apk artifacts/app/build/outputs/apk/release/app-release-unsigned.apk
-            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify artifacts/ParallelNest-release.apk
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:STORE_PASS --key-pass env:KEY_PASS --out artifacts/Clone-Apps-release.apk artifacts/app/build/outputs/apk/release/app-release-unsigned.apk
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify artifacts/Clone-Apps-release.apk
           else
             echo 'No production signing credentials: publish installable debug APK plus clearly named unsigned release.'
           fi
@@ -134,4 +134,4 @@ jobs:
         run: |
           find artifacts -name '*.apk' -o -name '*.zip' | sort > "$RUNNER_TEMP/assets.txt"
           mapfile -t assets < "$RUNNER_TEMP/assets.txt"
-          gh release create "$GITHUB_REF_NAME" "${assets[@]}" --prerelease --title "ParallelNest $GITHUB_REF_NAME" --notes-file docs/RELEASE-NOTES.md
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" --prerelease --title "Clone Apps $GITHUB_REF_NAME" --notes-file docs/RELEASE-NOTES.md

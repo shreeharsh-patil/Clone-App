@@ -14,7 +14,7 @@ class RecoveryDeletionTest {
         val device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
         val nest=context.applicationContext as NestApplication
         device.executeShellCommand("am start --user 0 -n org.parallelnest.app/.MainActivity")
-        assertTrue(device.wait(Until.hasObject(By.text("ParallelNest")),15_000))
+        assertTrue(device.wait(Until.hasObject(By.text("Clone Apps")),15_000))
         val row=nest.engine.getInstances().single { it.packageName=="org.parallelnest.probe" }
         val originalBefore=device.executeShellCommand("run-as org.parallelnest.probe --user 0 cat shared_prefs/probe.xml")
         assertTrue(originalBefore.contains("PERSONAL_SENTINEL_2026"))

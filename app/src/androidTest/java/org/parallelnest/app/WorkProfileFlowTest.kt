@@ -24,7 +24,7 @@ class WorkProfileFlowTest {
         assertNotNull("Missing UI action: $text", node)
         node.click()
     }
-    private fun startManager() { device.executeShellCommand("am start --user 0 -n org.parallelnest.app/.MainActivity"); device.wait(Until.hasObject(By.text("ParallelNest")),15_000) }
+    private fun startManager() { device.executeShellCommand("am start --user 0 -n org.parallelnest.app/.MainActivity"); device.wait(Until.hasObject(By.text("Clone Apps")),15_000) }
     private fun saveProbe(value: String) {
         val input = device.wait(Until.findObject(By.clazz("android.widget.EditText")),15_000)
         assertNotNull(input)
@@ -66,8 +66,15 @@ class WorkProfileFlowTest {
         saveProbe("PERSONAL_SENTINEL_2026")
         screenshot("personal-before")
         startManager()
-        click("Continue") // CI starts with fresh manager data; wait for its real content, not only the toolbar.
-        assertTrue(device.wait(Until.hasObject(By.text("Set up your space")),15_000))
+        click("Add App")
+        val search=device.wait(Until.findObject(By.desc("Search apps")),15_000)
+        assertNotNull(search);search.click()
+        val input=device.wait(Until.findObject(By.clazz("android.widget.EditText")),10_000)
+        assertNotNull(input);input.text="Clone Apps Probe";device.pressBack()
+        val select=device.wait(Until.findObject(By.clazz("android.widget.CheckBox")),10_000)
+        assertNotNull(select);select.click()
+        click("Install (1)")
+        assertTrue(device.wait(Until.hasObject(By.text("Set up work profile")),15_000))
         var checkbox=device.wait(Until.findObject(By.clazz("android.widget.CheckBox")),5_000)
         repeat(3) {
             if(checkbox==null) {
@@ -103,7 +110,7 @@ class WorkProfileFlowTest {
         allow.click()
         assertTrue("Android Bluetooth API must return a capability result inside the work app",device.wait(Until.hasObject(By.textStartsWith("Bluetooth API accessible")),15_000) || device.hasObject(By.text("Bluetooth hardware unavailable")))
         screenshot("work-bluetooth-permission")
-        val workUser=Regex("UserInfo\\{(\\d+):ParallelNest:").find(device.executeShellCommand("pm list users"))!!.groupValues[1]
+        val workUser=Regex("UserInfo\\{(\\d+):Clone Apps:").find(device.executeShellCommand("pm list users"))!!.groupValues[1]
         val personal=device.executeShellCommand("run-as org.parallelnest.probe --user 0 cat shared_prefs/probe.xml")
         val work=device.executeShellCommand("run-as org.parallelnest.probe --user $workUser cat shared_prefs/probe.xml")
         assertTrue(personal,personal.contains("PERSONAL_SENTINEL_2026"))

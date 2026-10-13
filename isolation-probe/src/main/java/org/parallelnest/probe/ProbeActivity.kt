@@ -24,6 +24,10 @@ class ProbeActivity : ComponentActivity() {
         if(granted) inspectBluetooth() else bluetooth="Nearby devices denied in this profile"
     }
     private fun inspectBluetooth() {
+        if(checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)!=PackageManager.PERMISSION_GRANTED) {
+            bluetooth="Nearby devices denied in this profile"
+            return
+        }
         bluetooth=runCatching {
             val adapter=getSystemService(BluetoothManager::class.java)?.adapter
             if(adapter==null) "Bluetooth hardware unavailable"
@@ -39,13 +43,13 @@ class ProbeActivity : ComponentActivity() {
             var value by remember { mutableStateOf(prefs.getString("value", "").orEmpty()) }
             var saved by remember { mutableStateOf(prefs.getString("value", "(empty)").orEmpty()) }
             MaterialTheme { Surface(Modifier.fillMaxSize()) { Column(Modifier.systemBarsPadding().verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("Nest Isolation Probe", style = MaterialTheme.typography.headlineMedium)
+                Text("Clone Apps Probe", style = MaterialTheme.typography.headlineMedium)
                 Text(if (user.isManagedProfile) "WORK PROFILE" else "PERSONAL PROFILE")
                 Text("UID: ${Process.myUid()} · Serial: ${user.getSerialNumberForUser(Process.myUserHandle())}")
                 OutlinedTextField(value, { value = it }, label = { Text("Independent persistent value") })
                 Button(onClick = { prefs.edit().putString("value", value).commit(); saved = value }) { Text("Save value") }
                 Text("Saved: $saved")
-                Text("This value is stored in this Android user's private SharedPreferences. No network or cross-profile code is present.")
+                Text("This value is stored in this Android user's private SharedPreferences. It is not synchronized or uploaded. The current probe screen checks storage isolation and Bluetooth API access; additional hardware helpers in source are not completed acceptance tests.")
                 Button(onClick={
                     if(checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)==PackageManager.PERMISSION_GRANTED) inspectBluetooth()
                     else nearbyPermission.launch(Manifest.permission.BLUETOOTH_CONNECT)
