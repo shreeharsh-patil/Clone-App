@@ -66,7 +66,9 @@ class WorkProfileEngine(private val context: Context, private val registry: Regi
             withContext(Dispatchers.IO) { BridgeAuth.sign(context, command) }
             command.component = forwarder() ?: error(status().description)
             withContext(Dispatchers.Main) { context.startActivity(command.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-            return withTimeout(180_000) { result.await() }
+            return try { withTimeout(180_000) { result.await() } } catch (_: TimeoutCancellationException) {
+                error("Android did not finish within three minutes. Resume the work profile and sync work apps to recover any completed installation.")
+            }
         } finally { OperationMailbox.pending.remove(nonce); callback.cancel() }
     }
     private fun result(intent: Intent) = OperationResult(intent.getBooleanExtra("success", false), intent.getStringExtra("message") ?: "No result returned")

@@ -41,7 +41,7 @@ class WorkProfileFlowTest {
         val deadline = System.currentTimeMillis()+120_000
         while(!result.isCompleted && System.currentTimeMillis()<deadline) {
             device.findObject(By.text("Install"))?.click()
-            device.findObject(By.text("Settings"))?.takeIf { device.hasObject(By.textContains("not allowed")) }?.click()
+            device.findObject(By.text("Settings"))?.takeIf { device.hasObject(By.textContains("unknown apps")) }?.click()
             device.findObject(By.text("Allow from this source"))?.let { label -> label.click(); device.pressBack() }
             device.findObject(By.text("OK"))?.click()
             delay(300)
