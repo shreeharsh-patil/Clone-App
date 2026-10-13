@@ -25,12 +25,9 @@ private val activeWorkOperations = ConcurrentHashMap<String, WeakReference<WorkC
 class WorkCommandActivity : ComponentActivity() {
     private var callback: PendingIntent? = null
     private var sessionId = -1
-    private val consent = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
-        if(result.resultCode == RESULT_CANCELED) {
-            if(sessionId >= 0) runCatching { packageManager.packageInstaller.abandonSession(sessionId) }
-            reply(false,"Installation cancelled in Android's confirmation screen")
-        }
-    }
+    // PackageInstaller's terminal broadcast is authoritative. Its confirmation
+    // Activity can return RESULT_CANCELED even after a successful install/delete.
+    private val consent = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { }
     private val dpm by lazy { getSystemService(DevicePolicyManager::class.java) }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

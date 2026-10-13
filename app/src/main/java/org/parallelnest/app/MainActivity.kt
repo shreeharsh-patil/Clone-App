@@ -61,6 +61,12 @@ class MainActivity : FragmentActivity() {
             val dark=when(state.theme){"light"->false;"dark"->true;else->isSystemInDarkTheme()}
             val colors=if(state.dynamic) if(dark) dynamicDarkColorScheme(this) else dynamicLightColorScheme(this) else if(dark) darkColorScheme() else lightColorScheme()
             MaterialTheme(colorScheme=colors) {
+                SideEffect {
+                    androidx.core.view.WindowCompat.getInsetsController(window,window.decorView).apply {
+                        isAppearanceLightStatusBars = !dark
+                        isAppearanceLightNavigationBars = !dark
+                    }
+                }
                 NestUi(vm,UiActions(
                     provision={runCatching{provision.launch(vm.engine.provisioningIntent())}.onFailure{vm.report(it.message ?: "No provisioning handler")}},
                     launch={row-> if(row.locked) authenticate{vm.launch(row)} else vm.launch(row)},
