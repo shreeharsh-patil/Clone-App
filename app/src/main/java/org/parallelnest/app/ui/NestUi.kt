@@ -63,7 +63,7 @@ private fun statusText(row: CloneInfo) = when { row.paused -> "Work profile paus
 @Composable private fun Preference(label: String, description: String, checked: Boolean, change: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().toggleable(value=checked,role=Role.Switch,onValueChange=change).padding(vertical=8.dp), horizontalArrangement=Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(label); Text(description, style = MaterialTheme.typography.bodySmall, color=MaterialTheme.colorScheme.onSurfaceVariant) }; Switch(checked, null) }
 }
-data class UiActions(val provision: () -> Unit, val launch: (CloneInfo) -> Unit, val original: (String) -> Unit, val profileSettings: () -> Unit, val bluetoothSettings: () -> Unit, val lock: (CloneInfo, Boolean) -> Unit, val pinSetup: () -> Unit, val backup: () -> Unit, val restore: () -> Unit, val logs: () -> Unit, val shortcut: (CloneInfo) -> Unit)
+data class UiActions(val provision: () -> Unit, val launch: (CloneInfo) -> Unit, val original: (String) -> Unit, val profileSettings: () -> Unit, val bluetoothSettings: () -> Unit, val bluetoothPermissions: () -> Unit, val bluetoothShare: () -> Unit, val lock: (CloneInfo, Boolean) -> Unit, val pinSetup: () -> Unit, val backup: () -> Unit, val restore: () -> Unit, val logs: () -> Unit, val shortcut: (CloneInfo) -> Unit)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable fun NestUi(vm: NestViewModel, actions: UiActions) {
@@ -75,7 +75,10 @@ data class UiActions(val provision: () -> Unit, val launch: (CloneInfo) -> Unit,
     LaunchedEffect(state.message) { state.message?.let { snackbar.showSnackbar(it); vm.clearMessage() } }
     LaunchedEffect(state.onboarded, route) { if (state.onboarded && route == "welcome") nav.navigate("home") { popUpTo("welcome") { inclusive = true } } }
     Scaffold(
-        topBar = { TopAppBar(title = { Text("ParallelNest", fontWeight = FontWeight.SemiBold) }, navigationIcon = { if (route !in listOf("home", "welcome", "")) TextButton(onClick = { nav.popBackStack() }) { Text("Back") } }, actions = { if (state.onboarded && route != "settings") TextButton(onClick = { nav.navigate("settings") }) { Text("Settings") } }) },
+        topBar = { TopAppBar(title = { Text("ParallelNest", fontWeight = FontWeight.SemiBold) }, navigationIcon = { if (route !in listOf("home", "welcome", "")) TextButton(onClick = { nav.popBackStack() }) { Text("Back") } }, actions = {
+            if(route in listOf("home","welcome")) TextButton(onClick={nav.navigate("bluetooth")}){Text("Bluetooth")}
+            if (state.onboarded && route != "settings") TextButton(onClick = { nav.navigate("settings") }) { Text("Settings") }
+        }) },
         snackbarHost = { SnackbarHost(snackbar) },
         floatingActionButton = { if (route == "home" && state.profile?.bridgeAvailable == true && !state.busy) ExtendedFloatingActionButton(onClick = { vm.discover(); nav.navigate("add") }) { Text("+  Add app") } }
     ) { padding ->
@@ -183,6 +186,7 @@ data class UiActions(val provision: () -> Unit, val launch: (CloneInfo) -> Unit,
                 }
                 composable("settings") {
                     Page("Settings","Keep your space personal.") {
+                        OutlinedButton(onClick={nav.navigate("bluetooth")},modifier=Modifier.fillMaxWidth()){Text("Bluetooth devices & file sharing")}
                         Text("Appearance",style=MaterialTheme.typography.titleMedium)
                         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){listOf("system","light","dark").forEach { theme -> FilterChip(selected=state.theme==theme,onClick={vm.theme(theme)},label={Text(theme.replaceFirstChar { it.uppercase() })}) }}
                         Preference("Dynamic color","Use your Android wallpaper colors",state.dynamic){vm.setting("dynamic",it)}
@@ -198,6 +202,7 @@ data class UiActions(val provision: () -> Unit, val launch: (CloneInfo) -> Unit,
                         OutlinedButton(onClick={nav.navigate("licenses")},modifier=Modifier.fillMaxWidth()){Text("About & open-source licenses")}
                     }
                 }
+                composable("bluetooth") { BluetoothScreen(actions.bluetoothSettings,actions.bluetoothPermissions,actions.bluetoothShare) }
                 composable("privacy") { Page("Privacy & security","Offline by design.") {
                     InfoCard("Your accounts stay inside their apps","ParallelNest does not collect credentials, intercept traffic, upload installed-app lists or read other apps' private data. No internet permission, analytics, ads or persistent monitoring service is included.")
                     InfoCard("Profile controller permissions","Only the work profile created with your consent is managed. Installation, suspension and deletion affect that profile. Remove it through Android settings only if you intend to erase all work-profile data.")

@@ -27,12 +27,19 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.*
 import org.parallelnest.app.core.*
 import org.parallelnest.app.ui.*
+import org.parallelnest.app.bluetooth.fileShareIntent
 
 class MainActivity : FragmentActivity() {
     private val vm by viewModels<NestViewModel>()
     private var pinAction by mutableStateOf<(() -> Unit)?>(null)
     private var pinSetup by mutableStateOf(false)
     private val secure by lazy { SecureStore(this) }
+    private val bluetoothFile = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> uri?.let {
+        runCatching {
+            val share=fileShareIntent(it,contentResolver.getType(it) ?: "application/octet-stream")
+            startActivity(Intent.createChooser(share,"Send selected file · choose Bluetooth"))
+        }.onFailure { vm.report(it.message ?: "Android file sharing is unavailable") }
+    } }
     private val provision = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result -> vm.report(if(result.resultCode==RESULT_OK) "Profile setup completed. Resume the profile and refresh if needed." else "Profile setup cancelled or rejected by Android"); vm.refresh() }
     private val backup = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri -> uri?.let {
         lifecycleScope.launch { try { withContext(Dispatchers.IO) { contentResolver.openOutputStream(it)?.use { stream -> stream.write(vm.registry.backup().toByteArray()) } ?: error("Could not write document") }; vm.report("Manager metadata exported") } catch(e:Exception){vm.report(e.message ?: "Export failed")} }
@@ -73,6 +80,8 @@ class MainActivity : FragmentActivity() {
                     original={pkg->runCatching{startActivity(packageManager.getLaunchIntentForPackage(pkg) ?: error("Original app is no longer installed"))}.onFailure{vm.report(it.message.orEmpty())}},
                     profileSettings={runCatching{startActivity(Intent(Settings.ACTION_SYNC_SETTINGS))}.onFailure{vm.report("Open Android settings to manage work profiles")}},
                     bluetoothSettings={runCatching{startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))}.onFailure{vm.report("Open Android settings to pair your Bluetooth device")}},
+                    bluetoothPermissions={runCatching{startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,android.net.Uri.fromParts("package",packageName,null)))}.onFailure{vm.report("Open ParallelNest app permissions in Android settings")}},
+                    bluetoothShare={bluetoothFile.launch(arrayOf("*/*"))},
                     lock={row,locked-> if(locked) {
                         val canAuth=BiometricManager.from(this).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)==BiometricManager.BIOMETRIC_SUCCESS
                         if(canAuth || secure.hasPin()) authenticate{vm.lock(row,true)} else vm.report("Set an Android screen lock or fallback PIN before locking launches")

@@ -37,6 +37,7 @@ fun configureProfile(context: Context, intent: Intent) {
     // only in our profile; each app still needs its own Nearby devices consent.
     dpm.clearUserRestriction(admin(context), UserManager.DISALLOW_BLUETOOTH_SHARING)
     if (BuildConfig.DEBUG) dpm.clearUserRestriction(admin(context), UserManager.DISALLOW_DEBUGGING_FEATURES)
+    else dpm.addUserRestriction(admin(context), UserManager.DISALLOW_DEBUGGING_FEATURES)
     dpm.setProfileEnabled(admin(context))
     context.packageManager.setComponentEnabledSetting(ComponentName(context, org.parallelnest.app.MainActivity::class.java), PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)
 }
