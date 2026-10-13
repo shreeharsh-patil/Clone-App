@@ -43,12 +43,15 @@ class WorkProfileFlowTest {
             device.findObject(By.text("Install"))?.click()
             device.findObject(By.text("Settings"))?.takeIf { device.hasObject(By.textContains("unknown apps")) }?.click()
             device.findObject(By.text("Allow from this source"))?.let {
-                val toggle=device.findObject(By.clazz("android.widget.Switch"))
+                val toggle=device.findObject(By.pkg("com.android.settings").checkable(true))
                 if(toggle!=null && !toggle.isChecked) toggle.click()
-                assertTrue("Unknown-source consent must be enabled before returning",device.wait(Until.hasObject(By.clazz("android.widget.Switch").checked(true)),5_000))
-                delay(700) // Settings writes the AppOp asynchronously.
-                device.pressBack()
-                device.wait(Until.gone(By.text("Allow from this source")),5_000)
+                // Android 16 Settings uses a Compose checkable row and can return
+                // to the installer automatically. Back then cancels installation.
+                if(!device.wait(Until.gone(By.text("Allow from this source")),3_000)) {
+                    assertTrue("Unknown-source consent must be enabled before returning",device.wait(Until.hasObject(By.pkg("com.android.settings").checkable(true).checked(true)),5_000))
+                    device.pressBack()
+                    device.wait(Until.gone(By.text("Allow from this source")),5_000)
+                }
             }
             delay(300)
         }
