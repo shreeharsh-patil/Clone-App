@@ -19,10 +19,20 @@ class WorkProfileFlowTest {
     private val context: Context = instrumentation.targetContext
     private val device = UiDevice.getInstance(instrumentation)
     private val nest get() = context.applicationContext as NestApplication
+    private fun click(selector: BySelector, timeout: Long = 15_000) {
+        val deadline=System.currentTimeMillis()+timeout
+        while(System.currentTimeMillis()<deadline) {
+            val node=device.wait(Until.findObject(selector),1_000) ?: continue
+            try { node.click();return } catch(_: StaleObjectException) {
+                // Compose may replace nodes when discovery/search completes.
+                // Reacquire the visible node; never keep an obsolete reference.
+                device.waitForIdle()
+            }
+        }
+        fail("Missing or unstable UI action: $selector")
+    }
     private fun click(text: String, timeout: Long = 15_000) {
-        val node = device.wait(Until.findObject(By.text(text)), timeout)
-        assertNotNull("Missing UI action: $text", node)
-        node.click()
+        click(By.text(text),timeout)
     }
     private fun startManager() { device.executeShellCommand("am start --user 0 -n org.parallelnest.app/.MainActivity"); device.wait(Until.hasObject(By.text("Clone Apps")),15_000) }
     private fun saveProbe(value: String) {
@@ -71,8 +81,9 @@ class WorkProfileFlowTest {
         assertNotNull(search);search.click()
         val input=device.wait(Until.findObject(By.clazz("android.widget.EditText")),10_000)
         assertNotNull(input);input.text="Clone Apps Probe";device.pressBack()
-        val select=device.wait(Until.findObject(By.clazz("android.widget.CheckBox")),10_000)
-        assertNotNull(select);select.click()
+        assertTrue("Filtered discovery must show the installed fixture",device.wait(Until.hasObject(By.text("org.parallelnest.probe")),10_000))
+        click(By.clazz("android.widget.CheckBox"),10_000)
+        assertTrue("Selecting the actual fixture must update the Install count",device.wait(Until.hasObject(By.text("Install (1)")),10_000))
         click("Install (1)")
         assertTrue(device.wait(Until.hasObject(By.text("Set up work profile")),15_000))
         var checkbox=device.wait(Until.findObject(By.clazz("android.widget.CheckBox")),5_000)
@@ -83,7 +94,7 @@ class WorkProfileFlowTest {
             }
         }
         assertNotNull("Provisioning explanation/consent checkbox",checkbox)
-        checkbox!!.click()
+        click(By.clazz("android.widget.CheckBox"))
         click("Create work profile")
         click("Accept & continue",30_000)
         screenshot("android-profile-consent")
