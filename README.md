@@ -122,3 +122,7 @@ Without these secrets, releases provide an installable **debug** APK and a clear
 No INTERNET, QUERY_ALL_PACKAGES, broad storage, accessibility-service, VPN, usage-access or notification-listener permission. Package installation/deletion and biometric permissions are justified by explicit user actions. The manager cannot back up arbitrary app data, read guest private caches, guarantee third-party account acceptance, evade Integrity checks, host unlimited virtual copies or silently take over an existing controller.
 
 Original project: Apache-2.0. [NOTICE](NOTICE), [license distribution](licenses/README.md), [complete runtime dependency notices](app/src/main/assets/third-party-notices.txt). Island and Shelter informed the source review; no GPL or proprietary engine was copied or linked. BlackBox/NewBlackbox/VirtualApp are not included. Changes to dependencies must regenerate and review the notices before release.
+
+See the [security review and scoped dependency advisory check](docs/SECURITY-REVIEW.md). The actual dark settings screen is shown below.
+
+![Actual dark settings](docs/screenshots/settings-dark.png)

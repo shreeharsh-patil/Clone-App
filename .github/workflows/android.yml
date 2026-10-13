@@ -78,6 +78,7 @@ jobs:
           api-level: ${{ matrix.api }}
           arch: x86_64
           profile: pixel_7
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -memory 4096 -cores 2
           target: google_apis
           script: bash scripts/ci-instrumentation.sh ${{ matrix.api }}
       - uses: actions/upload-artifact@v4

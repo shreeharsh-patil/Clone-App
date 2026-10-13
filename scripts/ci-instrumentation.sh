@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 api="${1:?API argument required}"
+mkdir -p build/device-evidence
+# Capture test-emulator diagnostics before the runner tears it down, including on failure.
+trap 'adb logcat -d -s AndroidRuntime:V ActivityManager:I > build/device-evidence/runtime.log 2>&1 || true; adb shell dumpsys meminfo > build/device-evidence/memory.txt 2>&1 || true' EXIT
 adb install -r isolation-probe/build/outputs/apk/debug/isolation-probe-debug.apk
 ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.profileFlow=true --console=plain
 if [ "$api" = '36' ]; then
