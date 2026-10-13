@@ -80,7 +80,10 @@ class WorkProfileFlowTest {
         val search=device.wait(Until.findObject(By.desc("Search apps")),15_000)
         assertNotNull(search);search.click()
         val input=device.wait(Until.findObject(By.clazz("android.widget.EditText")),10_000)
-        assertNotNull(input);input.text="Clone Apps Probe";device.pressBack()
+        assertNotNull(input);input.text="Clone Apps Probe"
+        // Accessibility setText does not necessarily open the keyboard. Back
+        // without an IME would leave Device Apps and invalidate its checkbox.
+        if(device.hasObject(By.pkg("com.google.android.inputmethod.latin")))device.pressBack()
         assertTrue("Filtered discovery must show the installed fixture",device.wait(Until.hasObject(By.text("org.parallelnest.probe")),10_000))
         click(By.clazz("android.widget.CheckBox"),10_000)
         assertTrue("Selecting the actual fixture must update the Install count",device.wait(Until.hasObject(By.text("Install (1)")),10_000))
