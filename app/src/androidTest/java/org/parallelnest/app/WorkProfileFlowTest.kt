@@ -94,6 +94,12 @@ class WorkProfileFlowTest {
         assertTrue(device.wait(Until.hasObject(By.text("WORK PROFILE")),15_000))
         saveProbe("WORK_SENTINEL_2026")
         screenshot("work-after")
+        click("Check Bluetooth")
+        val allow=device.wait(Until.findObject(By.text("Allow")),10_000)
+        assertNotNull("Work app must request its own Nearby devices consent",allow)
+        allow.click()
+        assertTrue("Android Bluetooth API must return a capability result inside the work app",device.wait(Until.hasObject(By.textStartsWith("Bluetooth API accessible")),15_000) || device.hasObject(By.text("Bluetooth hardware unavailable")))
+        screenshot("work-bluetooth-permission")
         val workUser=Regex("UserInfo\\{(\\d+):ParallelNest:").find(device.executeShellCommand("pm list users"))!!.groupValues[1]
         val personal=device.executeShellCommand("run-as org.parallelnest.probe --user 0 cat shared_prefs/probe.xml")
         val work=device.executeShellCommand("run-as org.parallelnest.probe --user $workUser cat shared_prefs/probe.xml")
