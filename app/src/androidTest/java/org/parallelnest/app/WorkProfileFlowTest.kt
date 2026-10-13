@@ -93,7 +93,10 @@ class WorkProfileFlowTest {
         assertTrue(nest.engine.status().description,nest.engine.status().bridgeAvailable)
         startManager()
         val app=nest.engine.listSupportedApps().first { it.packageName=="org.parallelnest.probe" }
-        val created=async(Dispatchers.Default){nest.engine.createInstance(app,"Probe · Work")}
+        // Reproduces an app update between selection and installation: the
+        // previously selected source path no longer exists. The engine must
+        // resolve the current installed fixture rather than trust that path.
+        val created=async(Dispatchers.Default){nest.engine.createInstance(app.copy(paths=listOf("/data/app/stale-selection.apk")),"Probe · Work")}
         awaitConsent(created)
         val installResult=created.await()
         if(!installResult.success)screenshot("install-failure")

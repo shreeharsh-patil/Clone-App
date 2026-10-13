@@ -80,11 +80,15 @@ class WorkProfileEngine(private val context: Context, private val registry: Regi
     override suspend fun createInstance(app: AppInfo, name: String, progress: (CreationStage)->Unit): OperationResult = createMutex.withLock {
         progress(CreationStage.CHECKING)
         require(name.trim().isNotEmpty() && name.length <= 80 && name.none { it.isISOControl() }) { "Name must be 1–80 characters without control characters" }
-        if (!app.supported) return@withLock OperationResult(false, app.reason)
+        // Package updates replace /data/app paths. A selection may survive an
+        // update, so re-read the installed package before sending APK sources.
+        val currentApp=listSupportedApps().firstOrNull { it.packageName==app.packageName }
+            ?: return@withLock OperationResult(false,"The original app is no longer installed or has no launcher activity. Refresh Device Apps.")
+        if (!currentApp.supported) return@withLock OperationResult(false, currentApp.reason)
         progress(CreationStage.PREPARING)
         check(status().bridgeAvailable) { status().description }
         progress(CreationStage.ANDROID)
-        val reply = request(if(app.system) "enable_system" else "install", app.packageName, name.trim(), if(app.system)emptyList() else app.paths)
+        val reply = request(if(currentApp.system) "enable_system" else "install", currentApp.packageName, name.trim(), if(currentApp.system)emptyList() else currentApp.paths)
         if (reply.getBooleanExtra("success", false)) {
             val serial = reply.getLongExtra("profile", -1)
             check(serial >= 0) { "Installer returned no profile identifier" }
