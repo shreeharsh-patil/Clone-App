@@ -73,7 +73,7 @@ import org.parallelnest.app.bluetooth.BluetoothController
         }
         if(state.permitted && state.enabled) {
             item { Text("Paired & discovered devices",style=MaterialTheme.typography.titleMedium) }
-            if(state.devices.isEmpty()) item { Text(if(state.scanning) "Searching… Make the other device discoverable." else "No devices listed. Scan for classic Bluetooth devices, or open Bluetooth settings for BLE and accessory setup.",color=MaterialTheme.colorScheme.onSurfaceVariant) }
+            if(state.devices.isEmpty()) item { Text(if(state.scanning) "Searching… Make the other device discoverable." else "No devices listed. Make the other device discoverable and scan, or open Bluetooth settings for accessory setup.",color=MaterialTheme.colorScheme.onSurfaceVariant) }
             items(state.devices,key={it.address}) { device ->
                 Card(Modifier.fillMaxWidth()) {
                     Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
@@ -85,6 +85,6 @@ import org.parallelnest.app.bluetooth.BluetoothController
                 }
             }
         }
-        item { Text("Pairing does not guarantee a connection: the other app or accessory must support the Bluetooth service you need. This screen discovers classic Bluetooth devices and uses Android's file-sharing service; it is not a general BLE/GATT terminal.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
+        item { Text("Some accessories need their own companion app. Open Android Bluetooth settings if your device is not found. Files can be sent to devices that support Bluetooth file sharing.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }

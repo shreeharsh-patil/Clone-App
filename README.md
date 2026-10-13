@@ -104,13 +104,21 @@ The manual isolation protocol and execution evidence are in [docs/TEST-RESULTS.m
 
 ![Actual manager dashboard](docs/screenshots/dashboard.png)
 
+## Bluetooth devices and file sharing
+
+Open **Bluetooth** from the toolbar or **Settings → Bluetooth devices & file sharing**. No work profile is required for this feature. Grant ParallelNest's **Nearby devices** permission to see paired devices, scan for discoverable classic Bluetooth devices and request Android pairing. Scans stop after 15 seconds or when the screen leaves the foreground. Use **Turn on Bluetooth** for Android's enable-consent prompt and **Bluetooth settings** for accessory configuration. Device names and addresses are held only in memory; no background service, internet upload or location permission is used. BLE/GATT interactions and accessory-specific services belong in the relevant accessory app.
+
+**Choose a file to send** opens Android's document picker, then the standard share menu. Choose **Bluetooth** and the receiving device. Android handles file transfer/progress; the receiver must support Bluetooth file sharing and the OS must expose a compatible sharing destination. Only the selected content URI receives a temporary read grant; ParallelNest does not copy private clone data, request broad storage access or retain the file URI.
+
+![Native Bluetooth manager](docs/screenshots/bluetooth-manager.png)
+
 ## Bluetooth in cloned apps
 
 ParallelNest allows outgoing Bluetooth sharing in its own work profile, including after an app update. Android otherwise blocks that sharing by default for managed profiles ([UserManager policy](https://developer.android.com/reference/android/os/UserManager#DISALLOW_BLUETOOTH_SHARING)). It does not change a different administrator's restrictions.
 
 Turn Bluetooth on and pair your device in Android settings. Resume the work profile and launch the work copy, then grant that app's **Nearby devices** permission when it asks. Each work app requests the Bluetooth permissions its features need; Android documents scanning, advertising and connecting separately ([Bluetooth permissions](https://developer.android.com/develop/connectivity/bluetooth/bt-permissions)). Open **Work app info & storage → Permissions** if permission was previously denied. A frozen app must be resumed before using Bluetooth.
 
-Settings offers **Check work Bluetooth access** and **Open Bluetooth settings**. The manager does not scan for devices, impersonate an adapter, grant runtime permissions silently or export work contacts. The separate first-party probe can request `BLUETOOTH_CONNECT` and read adapter state/paired-device count inside its work copy. On the local Android 16 emulator it returned **Bluetooth API accessible · on · 0 paired devices**, with permission granted to user 10 and denied to user 0. Physical pairing, BLE scanning, GATT/RFCOMM transfer and third-party Bluetooth behavior still need real hardware tests.
+Settings offers **Check work Bluetooth access** and **Open Bluetooth settings**. The manager does not impersonate an adapter, grant runtime permissions silently or export work contacts. Its own Bluetooth screen requests permissions separately from work apps. The independent probe can request `BLUETOOTH_CONNECT` and read adapter state/paired-device count inside its work copy. On the local Android 16 emulator it returned **Bluetooth API accessible · on · 0 paired devices**, with permission granted to user 10 and denied to user 0. Physical pairing, BLE scanning, GATT/RFCOMM transfer and third-party Bluetooth behavior still need real hardware tests.
 
 ![Work-profile Bluetooth API check](docs/screenshots/probe-bluetooth.png)
 

@@ -72,6 +72,7 @@ class BluetoothController(private val context: Context) {
         if(!hasPermission()) { mutable.update { it.copy(permitted=false,enabled=false,devices=emptyList(),scanning=false) };return }
         runCatching {
             val enabled=adapter?.isEnabled==true
+            if(!enabled) stopScan()
             val devices=if(enabled) {
                 val paired=adapter!!.bondedDevices.associate { it.address to entry(it) }
                 found.mapValues { (address,value) -> value.copy(bond=adapter.getRemoteDevice(address).bondState) } + paired
@@ -96,9 +97,10 @@ class BluetoothController(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun stopScan() {
         deadline?.cancel();deadline=null
+        val wasScanning=ownsDiscovery
         if(ownsDiscovery && hasPermission()) runCatching { adapter?.cancelDiscovery() }
         ownsDiscovery=false
-        mutable.update { it.copy(scanning=false) }
+        mutable.update { it.copy(scanning=false,message=if(wasScanning) "Scan stopped" else it.message) }
     }
     @SuppressLint("MissingPermission")
     fun pair(address: String) {

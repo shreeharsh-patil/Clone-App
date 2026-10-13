@@ -16,11 +16,11 @@ This is a code/dependency review and emulator verification, not a third-party pe
 
 ## Permissions
 
-Merged debug manifest inspected: USE_BIOMETRIC, legacy USE_FINGERPRINT supplied by AndroidX Biometric, REQUEST_INSTALL_PACKAGES, REQUEST_DELETE_PACKAGES and the AndroidX generated signature receiver permission. No INTERNET permission.
+Merged debug manifest inspected: USE_BIOMETRIC, legacy USE_FINGERPRINT supplied by AndroidX Biometric, REQUEST_INSTALL_PACKAGES, REQUEST_DELETE_PACKAGES, BLUETOOTH_CONNECT, BLUETOOTH_SCAN with neverForLocation, and the AndroidX generated signature receiver permission. No INTERNET, location or broad storage permission.
 
-Debug builds clear the managed profile's debugging restriction for tests on devices where the user enabled USB debugging. Production builds retain the default policy. This difference is disclosed before provisioning. Unknown-source installation is permitted within this controller's own profile, and Android's source-install permission/confirmation is still explicitly handled by the user.
+Debug builds clear the managed profile's debugging restriction for tests on devices where the user enabled USB debugging. Production builds explicitly reapply the default debugging restriction, including after an update from debug. This difference is disclosed before provisioning. Unknown-source installation is permitted within this controller's own profile, and Android's source-install permission/confirmation is still explicitly handled by the user.
 
-Bluetooth sharing is allowed in this controller's own profile. No personal/global restriction or Bluetooth contact-sharing policy is changed. Guest apps request their own Nearby devices permissions; ParallelNest does not grant them silently. The manager adds no Bluetooth runtime permission. The independent test probe declares only BLUETOOTH_CONNECT and checks state/paired-device count after OS permission consent.
+Bluetooth sharing is allowed in this controller's own profile. No personal/global restriction or Bluetooth contact-sharing policy is changed. Guest apps request their own Nearby devices permissions; ParallelNest does not grant them silently. The manager's separate Bluetooth screen requests CONNECT/SCAN through Android's Nearby devices consent. Classic discovery is user initiated, capped at 15 seconds and cancelled on lifecycle stop/navigation. Only its own discovery is cancelled; no background service or polling is added. Device details are bounded to 64 discovery records in memory and excluded from diagnostics/backups. Pairing uses the Android platform consent flow. File sharing delegates one user-selected content URI to Android's share menu with a temporary read grant; file/remote URI schemes are rejected and no URI is retained. The independent test probe declares only CONNECT and checks state/paired-device count after OS permission consent.
 
 ## Dependency records
 
