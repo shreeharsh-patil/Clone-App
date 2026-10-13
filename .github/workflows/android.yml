@@ -77,6 +77,7 @@ jobs:
         with:
           api-level: ${{ matrix.api }}
           arch: x86_64
+          profile: pixel_7
           target: google_apis
           script: bash scripts/ci-instrumentation.sh ${{ matrix.api }}
       - uses: actions/upload-artifact@v4

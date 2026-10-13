@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import org.parallelnest.app.core.*
 import java.io.File
 import java.lang.ref.WeakReference
@@ -51,13 +52,13 @@ class WorkCommandActivity : ComponentActivity() {
                     }
                     "install" -> install(pkg)
                     "launch" -> {
-                        check(dpm.setPackagesSuspended(admin(this@WorkCommandActivity), arrayOf(pkg), false).isEmpty()) { "Android refused to resume this app" }
+                        applySuspension(pkg,false)
                         val launch = packageManager.getLaunchIntentForPackage(pkg) ?: error("App has no launcher activity in the work profile")
                         startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                         reply(true, "Launched in the work profile")
                     }
                     "freeze" -> {
-                        check(dpm.setPackagesSuspended(admin(this@WorkCommandActivity), arrayOf(pkg), true).isEmpty()) { "Android cannot suspend this app (it may be critical or a profile administrator)" }
+                        applySuspension(pkg,true)
                         reply(true, "Work app suspended; launch resumes it")
                     }
                     "delete" -> {
@@ -72,6 +73,21 @@ class WorkCommandActivity : ComponentActivity() {
                 }
             } catch (e: Exception) { if (e is CancellationException) throw e; reply(false, e.message ?: "Android rejected this operation") }
         }
+    }
+    private suspend fun applySuspension(pkg: String, suspended: Boolean) {
+        val events=Channel<Unit>(Channel.CONFLATED)
+        val receiver=object: BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if(intent.getStringArrayExtra(Intent.EXTRA_CHANGED_PACKAGE_LIST)?.contains(pkg)==true) events.trySend(Unit)
+            }
+        }
+        registerReceiver(receiver,IntentFilter(if(suspended) Intent.ACTION_PACKAGES_SUSPENDED else Intent.ACTION_PACKAGES_UNSUSPENDED),Context.RECEIVER_EXPORTED)
+        try {
+            check(dpm.setPackagesSuspended(admin(this),arrayOf(pkg),suspended).isEmpty()) { "Android refused this suspension change; the app may be critical or policy controlled" }
+            try {
+                withTimeout(10_000) { while(withContext(Dispatchers.IO){packageManager.isPackageSuspended(pkg)}!=suspended) events.receive() }
+            } catch(_: TimeoutCancellationException) { error("Android did not apply the suspension change. Another system policy may control this app.") }
+        } finally { unregisterReceiver(receiver);events.close() }
     }
     private fun reply(success: Boolean, message: String, extra: Intent = Intent()) {
         extra.putExtra("success", success).putExtra("message", message).putExtra("profile", getSystemService(UserManager::class.java).getSerialNumberForUser(Process.myUserHandle()))
@@ -149,5 +165,6 @@ class OperationReceiver : BroadcastReceiver() {
         runCatching { parent.send(context, 0, result) }
         active?.finish()
         activeWorkOperations.remove(nonce)
+        PendingIntent.getBroadcast(context,nonce.hashCode(),Intent(context,OperationReceiver::class.java).setAction("INSTALL.$nonce"),PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_MUTABLE)?.cancel()
     }
 }

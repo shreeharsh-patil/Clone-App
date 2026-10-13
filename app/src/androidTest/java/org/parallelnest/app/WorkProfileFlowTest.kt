@@ -57,11 +57,17 @@ class WorkProfileFlowTest {
         saveProbe("PERSONAL_SENTINEL_2026")
         screenshot("personal-before")
         startManager()
-        if(device.hasObject(By.text("Continue")))click("Continue")
-        if(device.hasObject(By.text("Set up / resume work profile")))click("Set up / resume work profile")
-        val checkbox=device.wait(Until.findObject(By.clazz("android.widget.CheckBox")),15_000)
+        click("Continue") // CI starts with fresh manager data; wait for its real content, not only the toolbar.
+        assertTrue(device.wait(Until.hasObject(By.text("Set up your space")),15_000))
+        var checkbox=device.wait(Until.findObject(By.clazz("android.widget.CheckBox")),5_000)
+        repeat(3) {
+            if(checkbox==null) {
+                device.swipe(device.displayWidth/2,device.displayHeight*4/5,device.displayWidth/2,device.displayHeight/3,20)
+                checkbox=device.wait(Until.findObject(By.clazz("android.widget.CheckBox")),2_000)
+            }
+        }
         assertNotNull("Provisioning explanation/consent checkbox",checkbox)
-        checkbox.click()
+        checkbox!!.click()
         click("Create work profile")
         click("Accept & continue",30_000)
         screenshot("android-profile-consent")
