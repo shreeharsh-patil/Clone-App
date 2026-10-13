@@ -135,7 +135,7 @@ class WorkProfileFlowTest {
         assertTrue(work,work.contains("WORK_SENTINEL_2026"))
         assertFalse(work.contains("PERSONAL_SENTINEL_2026"))
         startManager()
-        val bluetooth=nest.engine.request("bluetooth")
+        val bluetooth=nest.profileEngine.request("bluetooth")
         assertFalse(bluetooth.getStringExtra("message").orEmpty().contains("restricted"))
         startManager()
         assertTrue(nest.engine.stopInstance(row).success)

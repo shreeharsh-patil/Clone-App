@@ -36,7 +36,7 @@ class MainActivity: ComponentActivity() {
         lifecycleScope.launch { try {
             val count=withContext(Dispatchers.IO) {
                 val text=contentResolver.openInputStream(it)?.use { input -> val bytes=input.readNBytes(1_048_577);require(bytes.size<=1_048_576){"Backup exceeds 1 MiB"};bytes.toString(Charsets.UTF_8) } ?: error("Could not read document")
-                vm.registry.restore(text,vm.engine.installedEnvironmentKeys())
+                vm.registry.restore(text,vm.profileEngine.installedEnvironmentKeys())
             };vm.report("Restored metadata for $count installed entries. App data was not restored.")
         }catch(e:Exception){vm.report(e.message ?: "Restore failed")} }
     } }
@@ -60,7 +60,7 @@ class MainActivity: ComponentActivity() {
                 SideEffect { androidx.core.view.WindowCompat.getInsetsController(window,window.decorView).apply { isAppearanceLightStatusBars=!dark;isAppearanceLightNavigationBars=!dark } }
                 NestUi(vm,UiActions(
                     version=BuildConfig.VERSION_NAME,debug=BuildConfig.DEBUG,
-                    provision={runCatching { provision.launch(vm.engine.provisioningIntent()) }.onFailure { vm.report(it.message ?: "No Android provisioning handler") }},
+                    provision={runCatching { provision.launch(vm.profileEngine.provisioningIntent()) }.onFailure { vm.report(it.message ?: "No Android provisioning handler") }},
                     launch=vm::launch,
                     original={pkg -> runCatching { startActivity(packageManager.getLaunchIntentForPackage(pkg) ?: error("Original app is no longer installed")) }.onFailure { vm.report(it.message.orEmpty()) }},
                     profileSettings={openSettings(Settings.ACTION_SYNC_SETTINGS)},
