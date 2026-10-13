@@ -15,4 +15,9 @@ interface CloneEngine {
     suspend fun deleteInstance(instance: CloneInfo): OperationResult
     suspend fun getInstances(): List<CloneInfo>
 }
-interface NestServices { val registry: Registry; val engine: WorkProfileEngine }
+/** The UI consumes engine-neutral clone operations. Profile-only operations remain on the legacy controller until the virtual runtime is verified. */
+interface NestServices {
+    val registry: Registry
+    val engine: CloneEngine
+    val profileEngine: WorkProfileEngine
+}
