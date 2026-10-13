@@ -37,7 +37,7 @@ else:
             if a.get('text') or a.get('content-desc') or a.get('class')=='android.widget.EditText' or a.get('checkable')=='true':
                 print(a.get('text') or a.get('content-desc') or ('<input>' if a.get('class')=='android.widget.EditText' else '<check>'),a.get('bounds'),a.get('class'), 'enabled='+a.get('enabled',''))
     else:
-        matches=[n for n in nodes if n.get('text')==args.value or n.get('content-desc')==args.value or args.value=='<input>' and n.get('class')=='android.widget.EditText' or args.value=='<check>' and n.get('checkable')=='true']
+        matches=[n for n in nodes if n.get('text')==args.value or n.get('content-desc')==args.value or args.value.endswith('*') and n.get('text','').startswith(args.value[:-1]) or args.value=='<input>' and n.get('class')=='android.widget.EditText' or args.value=='<check>' and n.get('checkable')=='true']
         if not matches:raise SystemExit(f'No visible node {args.value!r}')
         coords=list(map(int,re.findall(r'\d+',matches[0].get('bounds'))))
         run('shell','input','tap',str((coords[0]+coords[2])//2),str((coords[1]+coords[3])//2))

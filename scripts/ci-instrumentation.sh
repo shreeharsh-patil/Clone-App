@@ -4,6 +4,7 @@ api="${1:?API argument required}"
 adb install -r isolation-probe/build/outputs/apk/debug/isolation-probe-debug.apk
 ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.profileFlow=true --console=plain
 if [ "$api" = '36' ]; then
+  mkdir -p build/device-evidence
   adb pull /sdcard/Android/data/org.parallelnest.app/files/evidence build/device-evidence
   python3 scripts/verify-device-recovery.py
   adb install -r app/build/outputs/apk/debug/app-debug.apk

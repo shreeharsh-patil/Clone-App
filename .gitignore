@@ -10,4 +10,5 @@ rust-core/target/
 app/src/main/jniLibs/
 artifacts/
 *.log
+**/__pycache__/
 .avd/
