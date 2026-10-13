@@ -33,6 +33,9 @@ fun configureProfile(context: Context, intent: Intent) {
     // installations in our own profile; Android's installer still validates APKs
     // and displays its consent flow. Never modify another owner's restrictions.
     dpm.clearUserRestriction(admin(context), UserManager.DISALLOW_INSTALL_UNKNOWN_SOURCES)
+    // Managed profiles default to blocking outgoing Bluetooth sharing. Allow it
+    // only in our profile; each app still needs its own Nearby devices consent.
+    dpm.clearUserRestriction(admin(context), UserManager.DISALLOW_BLUETOOTH_SHARING)
     if (BuildConfig.DEBUG) dpm.clearUserRestriction(admin(context), UserManager.DISALLOW_DEBUGGING_FEATURES)
     dpm.setProfileEnabled(admin(context))
     context.packageManager.setComponentEnabledSetting(ComponentName(context, org.parallelnest.app.MainActivity::class.java), PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP)

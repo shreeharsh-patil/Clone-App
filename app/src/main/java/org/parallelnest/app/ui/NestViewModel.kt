@@ -37,6 +37,7 @@ class NestViewModel(app: Application) : AndroidViewModel(app) {
     fun freeze(row: CloneInfo) { viewModelScope.launch { runOperation { engine.stopInstance(row) } } }
     fun delete(row: CloneInfo) { viewModelScope.launch { runOperation { engine.deleteInstance(row) } } }
     fun synchronize() { viewModelScope.launch { runOperation { engine.adoptProfileApps() } } }
+    fun bluetooth() { viewModelScope.launch { runOperation { val r=engine.request("bluetooth"); OperationResult(r.getBooleanExtra("success",false),r.getStringExtra("message").orEmpty()) } } }
     fun info(row: CloneInfo) { viewModelScope.launch { runOperation { val r=engine.request("info", row.packageName); OperationResult(r.getBooleanExtra("success",false),r.getStringExtra("message").orEmpty()) } } }
     fun rename(row: CloneInfo, name: String) { viewModelScope.launch(Dispatchers.IO) { runOperation { engine.rename(row, name); OperationResult(true,"Name updated") } } }
     fun lock(row: CloneInfo, value: Boolean) { viewModelScope.launch(Dispatchers.IO) { runOperation { engine.lock(row, value); null } } }

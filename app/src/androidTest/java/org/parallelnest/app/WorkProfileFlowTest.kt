@@ -42,8 +42,14 @@ class WorkProfileFlowTest {
         while(!result.isCompleted && System.currentTimeMillis()<deadline) {
             device.findObject(By.text("Install"))?.click()
             device.findObject(By.text("Settings"))?.takeIf { device.hasObject(By.textContains("unknown apps")) }?.click()
-            device.findObject(By.text("Allow from this source"))?.let { label -> label.click(); device.pressBack() }
-            device.findObject(By.text("OK"))?.click()
+            device.findObject(By.text("Allow from this source"))?.let {
+                val toggle=device.findObject(By.clazz("android.widget.Switch"))
+                if(toggle!=null && !toggle.isChecked) toggle.click()
+                assertTrue("Unknown-source consent must be enabled before returning",device.wait(Until.hasObject(By.clazz("android.widget.Switch").checked(true)),5_000))
+                delay(700) // Settings writes the AppOp asynchronously.
+                device.pressBack()
+                device.wait(Until.gone(By.text("Allow from this source")),5_000)
+            }
             delay(300)
         }
         check(result.isCompleted) { "Operation did not complete after system consent" }
@@ -79,7 +85,9 @@ class WorkProfileFlowTest {
         val app=nest.engine.listSupportedApps().first { it.packageName=="org.parallelnest.probe" }
         val created=async(Dispatchers.Default){nest.engine.createInstance(app,"Probe · Work")}
         awaitConsent(created)
-        assertTrue(created.await().toString(),created.await().success)
+        val installResult=created.await()
+        if(!installResult.success)screenshot("install-failure")
+        assertTrue(installResult.toString(),installResult.success)
         val row=nest.engine.getInstances().single { it.packageName==app.packageName }
         startManager()
         assertTrue(nest.engine.launchInstance(row).success)
@@ -93,6 +101,9 @@ class WorkProfileFlowTest {
         assertFalse(personal.contains("WORK_SENTINEL_2026"))
         assertTrue(work,work.contains("WORK_SENTINEL_2026"))
         assertFalse(work.contains("PERSONAL_SENTINEL_2026"))
+        startManager()
+        val bluetooth=nest.engine.request("bluetooth")
+        assertFalse(bluetooth.getStringExtra("message").orEmpty().contains("restricted"))
         startManager()
         assertTrue(nest.engine.stopInstance(row).success)
         assertTrue(nest.engine.getInstances().single { it.id==row.id }.suspended)

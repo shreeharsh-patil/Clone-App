@@ -3,7 +3,7 @@ set -euo pipefail
 api="${1:?API argument required}"
 mkdir -p build/device-evidence
 # Capture test-emulator diagnostics before the runner tears it down, including on failure.
-trap 'adb logcat -d -s AndroidRuntime:V ActivityManager:I > build/device-evidence/runtime.log 2>&1 || true; adb shell dumpsys meminfo > build/device-evidence/memory.txt 2>&1 || true' EXIT
+trap 'adb logcat -d > build/device-evidence/runtime.log 2>&1 || true; adb shell dumpsys meminfo > build/device-evidence/memory.txt 2>&1 || true' EXIT
 adb install -r isolation-probe/build/outputs/apk/debug/isolation-probe-debug.apk
 ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.profileFlow=true --console=plain
 if [ "$api" = '36' ]; then
@@ -11,6 +11,7 @@ if [ "$api" = '36' ]; then
   adb pull /sdcard/Android/data/org.parallelnest.app/files/evidence build/device-evidence
   python3 scripts/verify-device-recovery.py
   adb install -r app/build/outputs/apk/debug/app-debug.apk
+  adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
   adb shell am instrument -w -r -e class org.parallelnest.app.RecoveryDeletionTest -e deleteFlow true org.parallelnest.app.test/androidx.test.runner.AndroidJUnitRunner | tee build/deletion-result.txt
   grep -q 'OK (1 test)' build/deletion-result.txt
 fi

@@ -5,18 +5,22 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.util.LruCache
 import androidx.compose.foundation.*
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.*
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.*
@@ -38,7 +42,9 @@ private fun statusText(row: CloneInfo) = when { row.paused -> "Work profile paus
             }.getOrNull()
         }
     }
-    Surface(shape = RoundedCornerShape(14.dp), color = if (accent == 0) MaterialTheme.colorScheme.surfaceContainerHighest else MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.size(48.dp)) {
+    val colors = MaterialTheme.colorScheme
+    val frame = listOf(colors.surfaceContainerHighest, colors.secondaryContainer, colors.tertiaryContainer, colors.primaryContainer, colors.surfaceVariant)
+    Surface(shape = RoundedCornerShape(14.dp), color = frame[accent.coerceIn(0,4)], modifier = Modifier.size(48.dp)) {
         Box(contentAlignment = Alignment.Center) { bitmap?.let { Image(it.asImageBitmap(), contentDescription = null, modifier = Modifier.size(if (accent == 0) 40.dp else 32.dp)) } ?: Text(pkg.substringAfterLast('.').take(1).uppercase(), fontWeight = FontWeight.Bold) }
     }
 }
@@ -55,9 +61,9 @@ private fun statusText(row: CloneInfo) = when { row.paused -> "Work profile paus
     }
 }
 @Composable private fun Preference(label: String, description: String, checked: Boolean, change: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(label); Text(description, style = MaterialTheme.typography.bodySmall) }; Switch(checked, change) }
+    Row(Modifier.fillMaxWidth().toggleable(value=checked,role=Role.Switch,onValueChange=change).padding(vertical=8.dp), horizontalArrangement=Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) { Column(Modifier.weight(1f)) { Text(label); Text(description, style = MaterialTheme.typography.bodySmall, color=MaterialTheme.colorScheme.onSurfaceVariant) }; Switch(checked, null) }
 }
-data class UiActions(val provision: () -> Unit, val launch: (CloneInfo) -> Unit, val original: (String) -> Unit, val profileSettings: () -> Unit, val lock: (CloneInfo, Boolean) -> Unit, val pinSetup: () -> Unit, val backup: () -> Unit, val restore: () -> Unit, val logs: () -> Unit, val shortcut: (CloneInfo) -> Unit)
+data class UiActions(val provision: () -> Unit, val launch: (CloneInfo) -> Unit, val original: (String) -> Unit, val profileSettings: () -> Unit, val bluetoothSettings: () -> Unit, val lock: (CloneInfo, Boolean) -> Unit, val pinSetup: () -> Unit, val backup: () -> Unit, val restore: () -> Unit, val logs: () -> Unit, val shortcut: (CloneInfo) -> Unit)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable fun NestUi(vm: NestViewModel, actions: UiActions) {
@@ -71,7 +77,7 @@ data class UiActions(val provision: () -> Unit, val launch: (CloneInfo) -> Unit,
     Scaffold(
         topBar = { TopAppBar(title = { Text("ParallelNest", fontWeight = FontWeight.SemiBold) }, navigationIcon = { if (route !in listOf("home", "welcome", "")) TextButton(onClick = { nav.popBackStack() }) { Text("Back") } }, actions = { if (state.onboarded && route != "settings") TextButton(onClick = { nav.navigate("settings") }) { Text("Settings") } }) },
         snackbarHost = { SnackbarHost(snackbar) },
-        floatingActionButton = { if (route == "home" && state.profile?.bridgeAvailable == true) ExtendedFloatingActionButton(onClick = { vm.discover(); nav.navigate("add") }) { Text("+  Add app") } }
+        floatingActionButton = { if (route == "home" && state.profile?.bridgeAvailable == true && !state.busy) ExtendedFloatingActionButton(onClick = { vm.discover(); nav.navigate("add") }) { Text("+  Add app") } }
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -86,7 +92,7 @@ data class UiActions(val provision: () -> Unit, val launch: (CloneInfo) -> Unit,
                 composable("setup") {
                     var consent by remember { mutableStateOf(false) }
                     Page("Set up your space", state.profile?.description) {
-                        InfoCard("Android work profile", "Android will ask for permission to create a managed profile. ParallelNest becomes its controller and can install, launch, suspend and uninstall apps inside it. Personal app data stays separate.")
+                        InfoCard("Android work profile", "Android will ask for permission to create a managed profile. ParallelNest becomes its controller and can install, launch, suspend and uninstall apps inside it. Personal app data stays separate. Bluetooth sharing is allowed; work apps request their own Nearby devices permissions.")
                         if(BuildConfig.DEBUG) Text("Evaluation build: work-profile debugging is enabled for testing when Android USB debugging is enabled. Production builds retain the default debugging restriction.",style=MaterialTheme.typography.bodySmall)
                         if (state.profile?.canProvision == true) {
                             Row(verticalAlignment = Alignment.CenterVertically) { Checkbox(consent,{consent=it}); Text("I understand and want to create a new work profile", Modifier.weight(1f)) }
@@ -98,11 +104,13 @@ data class UiActions(val provision: () -> Unit, val launch: (CloneInfo) -> Unit,
                     }
                 }
                 composable("home") {
-                    var search by remember { mutableStateOf("") }
+                    var search by rememberSaveable { mutableStateOf("") }
                     val rows = state.instances.filter { it.name.contains(search,true) || it.packageName.contains(search,true) }
-                    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    val header: @Composable () -> Unit = {
+                      Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         Text("Your spaces", style = MaterialTheme.typography.headlineLarge)
                         Text(state.profile?.description ?: "Checking Android profiles…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if(state.instances.isNotEmpty()) Text("${state.instances.size} work apps · ${state.instances.count { it.suspended }} frozen · ${state.instances.count { it.locked }} launch locked",style=MaterialTheme.typography.labelLarge,color=MaterialTheme.colorScheme.primary)
                         if (state.profile?.bridgeAvailable != true) {
                             Button(onClick = { nav.navigate("setup") }) { Text("Set up / resume work profile") }
                         } else {
@@ -111,20 +119,27 @@ data class UiActions(val provision: () -> Unit, val launch: (CloneInfo) -> Unit,
                                 TextButton(onClick = { vm.setting("grid", !state.grid) }) { Text(if (state.grid) "List view" else "Grid view") }
                             }
                         }
-                        OutlinedTextField(search,{search=it}, label={Text("Search instances")}, modifier=Modifier.fillMaxWidth(), singleLine=true)
-                        if (rows.isEmpty()) {
-                            InfoCard("Make room for another account", if (state.instances.isEmpty()) "Set up your work profile, then add an installed app. Its second copy will have separate persistent data." else "No instances match this search.")
-                        } else if (state.grid) {
-                            LazyVerticalGrid(columns = GridCells.Adaptive(150.dp), contentPadding = PaddingValues(bottom = 100.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                items(rows, key = { it.id }) { row -> InstanceCard(row, state.busy, {actions.launch(row)}, {nav.navigate("instance/${row.id}")}, true) }
-                            }
-                        } else {
-                            LazyColumn(contentPadding=PaddingValues(bottom=100.dp), verticalArrangement=Arrangement.spacedBy(12.dp)) { items(rows,key={it.id}) { row -> InstanceCard(row,state.busy,{actions.launch(row)},{nav.navigate("instance/${row.id}")},false) } }
+                        OutlinedTextField(search,{search=it}, label={Text("Search instances")}, modifier=Modifier.fillMaxWidth(), singleLine=true, trailingIcon={if(search.isNotEmpty()) TextButton(onClick={search=""}){Text("Clear")}})
+                      }
+                    }
+                    if(state.grid && rows.isNotEmpty()) {
+                        LazyVerticalGrid(columns=GridCells.Adaptive(160.dp),modifier=Modifier.fillMaxSize().padding(horizontal=20.dp),contentPadding=PaddingValues(top=12.dp,bottom=110.dp),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                            item(span={GridItemSpan(maxLineSpan)}) { header() }
+                            items(rows,key={it.id}) { row -> InstanceCard(row,state.busy,{actions.launch(row)},{nav.navigate("instance/${row.id}")},true) }
                         }
+                    } else {
+                      LazyColumn(Modifier.fillMaxSize().padding(horizontal=20.dp),contentPadding=PaddingValues(top=12.dp,bottom=110.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) {
+                        item { header() }
+                        if (rows.isEmpty()) {
+                            item { InfoCard(if(search.isEmpty()) "Make room for another account" else "No matching apps", if (state.instances.isEmpty()) "Add an installed app to give its second copy separate persistent data and accounts." else "Try the app's name or package name.") }
+                        } else {
+                            items(rows,key={it.id}) { row -> InstanceCard(row,state.busy,{actions.launch(row)},{nav.navigate("instance/${row.id}")},false) }
+                        }
+                      }
                     }
                 }
                 composable("add") {
-                    var search by remember { mutableStateOf("") }
+                    var search by rememberSaveable { mutableStateOf("") }
                     var selected by remember { mutableStateOf<AppInfo?>(null) }
                     var name by remember { mutableStateOf("") }
                     Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement=Arrangement.spacedBy(16.dp)) {
@@ -154,9 +169,9 @@ data class UiActions(val provision: () -> Unit, val launch: (CloneInfo) -> Unit,
                         Text("${statusText(row)} · serial ${row.profile}")
                         Button(onClick={actions.launch(row)},enabled=!state.busy,modifier=Modifier.fillMaxWidth()){Text("Launch work copy")}
                         OutlinedButton(onClick={actions.original(row.packageName)},modifier=Modifier.fillMaxWidth()){Text("Launch original")}
-                        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){TextButton(onClick={rename=true}){Text("Rename")};TextButton(onClick={vm.accent(row,(row.accent+1)%2)}){Text("Change icon style")}}
+                        Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){TextButton(onClick={rename=true},enabled=!state.busy){Text("Rename")};TextButton(onClick={vm.accent(row,(row.accent+1)%5)},enabled=!state.busy){Text("Change icon style")}}
                         OutlinedButton(onClick={actions.lock(row,!row.locked)},modifier=Modifier.fillMaxWidth()){Text(if(row.locked) "Remove launch lock" else "Lock before launch")}
-                        OutlinedButton(onClick={vm.freeze(row)},enabled=!state.busy,modifier=Modifier.fillMaxWidth()){Text("Freeze work app")}
+                        OutlinedButton(onClick={vm.freeze(row)},enabled=!state.busy && !row.suspended && !row.paused,modifier=Modifier.fillMaxWidth()){Text(if(row.suspended) "Frozen · launch to resume" else "Freeze work app")}
                         OutlinedButton(onClick={vm.info(row)},enabled=!state.busy,modifier=Modifier.fillMaxWidth()){Text("Work app info & storage")}
                         OutlinedButton(onClick={actions.shortcut(row)},modifier=Modifier.fillMaxWidth()){Text("Add launch shortcut")}
                         Text("Created ${DateFormat.getDateTimeInstance().format(Date(row.created))}\nLast successful launch: ${if(row.lastLaunch==0L) "Never" else DateFormat.getDateTimeInstance().format(Date(row.lastLaunch))}",style=MaterialTheme.typography.bodySmall)
@@ -173,6 +188,10 @@ data class UiActions(val provision: () -> Unit, val launch: (CloneInfo) -> Unit,
                         Preference("Dynamic color","Use your Android wallpaper colors",state.dynamic){vm.setting("dynamic",it)}
                         InfoCard("Security","Launch locks authenticate every launch made through ParallelNest. Other launchers and notification entry points can still open work apps.") {OutlinedButton(onClick=actions.pinSetup){Text("Set / change fallback PIN")};TextButton(onClick={nav.navigate("privacy")}){Text("Privacy & security")}}
                         InfoCard("Metadata backup","Exports instance names, preferences and timestamps. No app credentials or protected app data. Restore only matches apps still installed in this device's work profile; locks must be configured again."){Row(horizontalArrangement=Arrangement.spacedBy(8.dp)){OutlinedButton(onClick=actions.backup){Text("Export")};OutlinedButton(onClick=actions.restore){Text("Restore")}}}
+                        InfoCard("Bluetooth in work apps","Turn Bluetooth on in Android settings. Inside the work app, allow Nearby devices when requested. Pairing uses Android's shared Bluetooth hardware. A frozen app or paused profile cannot connect.") {
+                            OutlinedButton(onClick=vm::bluetooth,enabled=!state.busy && state.profile?.bridgeAvailable==true){Text("Check work Bluetooth access")}
+                            TextButton(onClick=actions.bluetoothSettings){Text("Open Bluetooth settings")}
+                        }
                         OutlinedButton(onClick={nav.navigate("setup")},modifier=Modifier.fillMaxWidth()){Text("Clone engine setup")}
                         OutlinedButton(onClick={nav.navigate("diagnostics")},modifier=Modifier.fillMaxWidth()){Text("Compatibility & diagnostics")}
                         OutlinedButton(onClick=actions.logs,modifier=Modifier.fillMaxWidth()){Text("Export diagnostics")}
@@ -213,7 +232,7 @@ data class UiActions(val provision: () -> Unit, val launch: (CloneInfo) -> Unit,
 @OptIn(ExperimentalFoundationApi::class)
 @Composable private fun InstanceCard(row: CloneInfo, busy: Boolean, launch: () -> Unit, manage: () -> Unit, grid: Boolean) {
     Card(Modifier.fillMaxWidth().combinedClickable(onClick = manage, onLongClick = manage)) {
-        if(grid) Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){AppIcon(row.packageName,row.accent);Text(row.name,style=MaterialTheme.typography.titleMedium);Text(statusText(row),style=MaterialTheme.typography.bodySmall);Button(onClick=launch,enabled=!busy){Text("Launch")}}
-        else Row(Modifier.padding(16.dp),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalAlignment=Alignment.CenterVertically){AppIcon(row.packageName,row.accent);Column(Modifier.weight(1f)){Text(row.name,style=MaterialTheme.typography.titleMedium);Text(statusText(row),style=MaterialTheme.typography.bodySmall)};TextButton(onClick=launch,enabled=!busy){Text("Launch")}}
+        if(grid) Column(Modifier.padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)){AppIcon(row.packageName,row.accent);Text(row.name,style=MaterialTheme.typography.titleMedium,maxLines=2,overflow=TextOverflow.Ellipsis);Text(statusText(row),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant);Button(onClick=launch,enabled=!busy && !row.paused,modifier=Modifier.fillMaxWidth()){Text(if(row.suspended) "Resume" else "Launch")}}
+        else Row(Modifier.padding(16.dp),horizontalArrangement=Arrangement.spacedBy(12.dp),verticalAlignment=Alignment.CenterVertically){AppIcon(row.packageName,row.accent);Column(Modifier.weight(1f)){Text(row.name,style=MaterialTheme.typography.titleMedium,maxLines=2,overflow=TextOverflow.Ellipsis);Text(statusText(row),style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)};TextButton(onClick=launch,enabled=!busy && !row.paused){Text(if(row.suspended) "Resume" else "Launch")}}
     }
 }

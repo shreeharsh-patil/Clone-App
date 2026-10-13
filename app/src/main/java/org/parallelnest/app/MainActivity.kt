@@ -72,6 +72,7 @@ class MainActivity : FragmentActivity() {
                     launch={row-> if(row.locked) authenticate{vm.launch(row)} else vm.launch(row)},
                     original={pkg->runCatching{startActivity(packageManager.getLaunchIntentForPackage(pkg) ?: error("Original app is no longer installed"))}.onFailure{vm.report(it.message.orEmpty())}},
                     profileSettings={runCatching{startActivity(Intent(Settings.ACTION_SYNC_SETTINGS))}.onFailure{vm.report("Open Android settings to manage work profiles")}},
+                    bluetoothSettings={runCatching{startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))}.onFailure{vm.report("Open Android settings to pair your Bluetooth device")}},
                     lock={row,locked-> if(locked) {
                         val canAuth=BiometricManager.from(this).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)==BiometricManager.BIOMETRIC_SUCCESS
                         if(canAuth || secure.hasPin()) authenticate{vm.lock(row,true)} else vm.report("Set an Android screen lock or fallback PIN before locking launches")

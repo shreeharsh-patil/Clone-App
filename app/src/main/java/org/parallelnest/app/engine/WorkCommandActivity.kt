@@ -41,8 +41,19 @@ class WorkCommandActivity : ComponentActivity() {
             try {
                 val pkg = intent.getStringExtra("package").orEmpty()
                 val op = intent.getStringExtra("op")
-                require(op == "list" || pkg != packageName && Regex("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+").matches(pkg)) { "Invalid target package" }
+                require(op in listOf("list", "bluetooth") || pkg != packageName && Regex("[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+").matches(pkg)) { "Invalid target package" }
                 when (op) {
+                    "bluetooth" -> {
+                        dpm.clearUserRestriction(admin(this@WorkCommandActivity), UserManager.DISALLOW_BLUETOOTH_SHARING)
+                        val users = getSystemService(UserManager::class.java)
+                        val blocked = users.hasUserRestriction(UserManager.DISALLOW_BLUETOOTH_SHARING) || users.hasUserRestriction(UserManager.DISALLOW_BLUETOOTH)
+                        val hardware = packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH)
+                        reply(!blocked && hardware, when {
+                            blocked -> "Bluetooth is restricted by another Android policy. ParallelNest cannot override that policy."
+                            !hardware -> "This device does not report Bluetooth hardware. Physical connections cannot be tested here."
+                            else -> "Bluetooth sharing is allowed in the work profile. Turn Bluetooth on in Android settings, then grant Nearby devices permission inside the work app."
+                        })
+                    }
                     "list" -> {
                         val apps = withContext(Dispatchers.IO) { packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), PackageManager.ResolveInfoFlags.of(0)).filter { it.activityInfo.packageName != packageName }.distinctBy { it.activityInfo.packageName } }
                         reply(true, "Profile apps loaded", Intent().putStringArrayListExtra("packages", ArrayList(apps.map { it.activityInfo.packageName })).putStringArrayListExtra("labels", ArrayList(apps.map { it.loadLabel(packageManager).toString() })))

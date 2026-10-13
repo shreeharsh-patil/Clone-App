@@ -13,7 +13,7 @@
         <activity android:name=".MainActivity" android:exported="true">
             <intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter>
         </activity>
-        <activity android:name=".engine.WorkCommandActivity" android:exported="true" android:excludeFromRecents="true">
+        <activity android:name=".engine.WorkCommandActivity" android:exported="true" android:excludeFromRecents="true" android:configChanges="orientation|screenSize|screenLayout|keyboardHidden">
             <intent-filter><action android:name="org.parallelnest.app.WORK_COMMAND" /><category android:name="android.intent.category.DEFAULT" /></intent-filter>
         </activity>
         <activity android:name=".engine.ProvisionActivity" android:exported="true" android:permission="android.permission.BIND_DEVICE_ADMIN" android:excludeFromRecents="true">
