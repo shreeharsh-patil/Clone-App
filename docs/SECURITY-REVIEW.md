@@ -20,6 +20,8 @@ Merged debug manifest inspected: USE_BIOMETRIC, legacy USE_FINGERPRINT supplied 
 
 Debug builds clear the managed profile's debugging restriction for tests on devices where the user enabled USB debugging. Production builds retain the default policy. This difference is disclosed before provisioning. Unknown-source installation is permitted within this controller's own profile, and Android's source-install permission/confirmation is still explicitly handled by the user.
 
+Bluetooth sharing is allowed in this controller's own profile. No personal/global restriction or Bluetooth contact-sharing policy is changed. Guest apps request their own Nearby devices permissions; ParallelNest does not grant them silently. The manager adds no Bluetooth runtime permission. The independent test probe declares only BLUETOOTH_CONNECT and checks state/paired-device count after OS permission consent.
+
 ## Dependency records
 
 The OSV public batch API was queried for **132** locked dependency versions: 37 Cargo graph packages and 95 resolved Maven coordinates. **0 versions returned advisory records** at the recorded check time. Source: https://api.osv.dev/v1/querybatch; reproducible check: scripts/check-advisories.py. The raw local result is artifacts/advisory-check.json (an evaluation artifact, not a runtime upload feature).
