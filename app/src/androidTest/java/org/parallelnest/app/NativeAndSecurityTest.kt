@@ -19,6 +19,7 @@ class NativeAndSecurityTest {
         assertThrows(IllegalArgumentException::class.java){NativeCore.canonicalize(RegistryCodec.encode(listOf(row,row.copy(id=UUID.randomUUID().toString()))))}
     }
     @Test fun forgedBridgeCommandRejected() { assertFalse(BridgeAuth.verify(context,Intent().putExtra("op","delete").putExtra("package","org.example.probe"))) }
+    @Test fun forgedBridgeReplyRejected() { assertFalse(BridgeAuth.verifyReply(context,Intent().putExtra("success",true).putExtra("profile",10L).putExtra("reply_mac",ByteArray(32)))) }
     @Test fun keystoreEncryptsAndPinVerifiesWithRetryDelay() {
         val store=SecureStore(context)
         store.put("test",byteArrayOf(1,2,3))

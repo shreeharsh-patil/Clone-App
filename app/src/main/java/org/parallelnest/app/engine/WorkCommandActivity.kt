@@ -88,6 +88,7 @@ class WorkCommandActivity : ComponentActivity() {
     }
     private fun reply(success: Boolean, message: String, extra: Intent = Intent()) {
         extra.putExtra("success", success).putExtra("message", message).putExtra("profile", getSystemService(UserManager::class.java).getSerialNumberForUser(Process.myUserHandle()))
+        BridgeAuth.signReply(this,extra,intent.getStringExtra("nonce")!!)
         runCatching { callback?.send(this, 0, extra) }
         finish()
     }
@@ -140,7 +141,10 @@ class WorkCommandActivity : ComponentActivity() {
 class OperationReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (!intent.getBooleanExtra("installer", false)) {
-            intent.getStringExtra("nonce")?.let { OperationMailbox.pending.remove(it)?.complete(intent) }
+            val pendingResult=goAsync()
+            CoroutineScope(Dispatchers.IO).launch {
+                try { if(BridgeAuth.verifyReply(context,intent)) intent.getStringExtra("nonce")?.let { OperationMailbox.pending.remove(it)?.complete(intent) } } finally { pendingResult.finish() }
+            }
             return
         }
         if(!context.getSystemService(UserManager::class.java).isManagedProfile || !context.getSystemService(DevicePolicyManager::class.java).isProfileOwnerApp(context.packageName)) return
@@ -159,6 +163,7 @@ class OperationReceiver : BroadcastReceiver() {
         val success = status == PackageInstaller.STATUS_SUCCESS
         val result = Intent().putExtra("success", success).putExtra("profile", context.getSystemService(UserManager::class.java).getSerialNumberForUser(Process.myUserHandle()))
             .putExtra("message", if (success) if (intent.getStringExtra("operation") == "delete") "Work-profile app deleted; personal data is untouched" else "App installed in a separate work profile" else intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Installation/deletion cancelled or blocked by Android. Retry with the work operation in the foreground.")
+        BridgeAuth.signReply(context,result,nonce)
         runCatching { parent.send(context, 0, result) }
         active?.finish()
         activeWorkOperations.remove(nonce)

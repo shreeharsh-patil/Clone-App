@@ -38,7 +38,7 @@ class Registry(private val context: Context) {
     suspend fun textSetting(name: String, value: String) { context.nestData.edit { it[stringPreferencesKey(name)] = value } }
     suspend fun backup(): String {
         val p = context.nestData.data.first()
-        return JSONObject().put("schema", 1).put("registry", JSONObject(NativeCore.canonicalize(p[key] ?: empty))).put("theme", p[stringPreferencesKey("theme")] ?: "system").put("dynamic", p[booleanPreferencesKey("dynamic")] ?: true).toString(2)
+        return JSONObject().put("schema", 1).put("registry", JSONObject(NativeCore.canonicalize(p[key] ?: empty))).put("theme", p[stringPreferencesKey("theme")] ?: "system").put("dynamic", p[booleanPreferencesKey("dynamic")] ?: true).put("grid",p[booleanPreferencesKey("grid")] ?: false).toString(2)
     }
     suspend fun restore(text: String, available: Set<Pair<String, Long>>): Int {
         require(text.toByteArray().size <= 1_048_576) { "Backup exceeds 1 MiB" }
@@ -52,6 +52,7 @@ class Registry(private val context: Context) {
             p[key] = NativeCore.canonicalize(RegistryCodec.encode(old + incoming.filter { r -> old.none { it.packageName == r.packageName && it.profile == r.profile || it.id == r.id } }))
             p[stringPreferencesKey("theme")] = theme
             p[booleanPreferencesKey("dynamic")] = root.optBoolean("dynamic", true)
+            p[booleanPreferencesKey("grid")] = root.optBoolean("grid", false)
         }
         return incoming.size
     }
