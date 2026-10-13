@@ -29,9 +29,9 @@ class WorkProfileFlowTest {
         val input = device.wait(Until.findObject(By.clazz("android.widget.EditText")),15_000)
         assertNotNull(input)
         input.text = value
-        device.pressBack()
         click("Save value")
         assertTrue(device.wait(Until.hasObject(By.text("Saved: $value")),10_000))
+        if(device.hasObject(By.pkg("com.google.android.inputmethod.latin")))device.pressBack()
     }
     private fun screenshot(name: String) {
         val folder = File(context.getExternalFilesDir(null),"evidence").apply { mkdirs() }
