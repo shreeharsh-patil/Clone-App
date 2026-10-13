@@ -24,6 +24,7 @@ data class NestState(val profile: ProfileState?=null,val instances: List<CloneIn
 class NestViewModel(app: Application,private val saved: SavedStateHandle): AndroidViewModel(app) {
     private val nest=app as NestServices
     val engine=nest.engine
+    val profileEngine=nest.profileEngine
     val registry=nest.registry
     private val operation=Mutex()
     private val mutable=MutableStateFlow(NestState(selection=saved["selection"] ?: emptyList(),query=saved["query"] ?: ""))
@@ -77,17 +78,17 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
     fun launch(row: CloneInfo) { viewModelScope.launch { runOperation { engine.launchInstance(row) } } }
     fun freeze(row: CloneInfo) { viewModelScope.launch { runOperation { engine.stopInstance(row) } } }
     fun delete(row: CloneInfo) { viewModelScope.launch { runOperation { engine.deleteInstance(row) } } }
-    fun synchronize() { viewModelScope.launch { runOperation { if(engine.status().bridgeAvailable)engine.adoptProfileApps() else { refresh();OperationResult(false,engine.status().description) } } } }
-    fun info(row: CloneInfo) { viewModelScope.launch { runOperation { val r=engine.request("info",row.packageName);OperationResult(r.getBooleanExtra("success",false),r.getStringExtra("message").orEmpty()) } } }
-    fun rename(row: CloneInfo,name: String) { viewModelScope.launch { runOperation { engine.rename(row,name);OperationResult(true,"Name updated") } } }
-    fun accent(row: CloneInfo,value: Int) { viewModelScope.launch { runOperation { engine.accent(row,value);OperationResult(true,"Instance icon style updated") } } }
+    fun synchronize() { viewModelScope.launch { runOperation { if(engine.status().bridgeAvailable)profileEngine.adoptProfileApps() else { refresh();OperationResult(false,engine.status().description) } } } }
+    fun info(row: CloneInfo) { viewModelScope.launch { runOperation { val r=profileEngine.request("info",row.packageName);OperationResult(r.getBooleanExtra("success",false),r.getStringExtra("message").orEmpty()) } } }
+    fun rename(row: CloneInfo,name: String) { viewModelScope.launch { runOperation { profileEngine.rename(row,name);OperationResult(true,"Name updated") } } }
+    fun accent(row: CloneInfo,value: Int) { viewModelScope.launch { runOperation { profileEngine.accent(row,value);OperationResult(true,"Instance icon style updated") } } }
     fun theme(value: String) { viewModelScope.launch { registry.textSetting("theme",value) } }
     fun diagnostics(row: CloneInfo) {
         viewModelScope.launch {
             if(state.value.diagnosticBusy)return@launch
             mutable.update { it.copy(diagnosticBusy=true,report=null) }
             try {
-                val reply=engine.request("compatibility",row.packageName)
+                val reply=profileEngine.request("compatibility",row.packageName)
                 check(reply.getBooleanExtra("success",false)) { reply.getStringExtra("message").orEmpty() }
                 val report=CompatibilityReport.parse(reply.getStringExtra("diagnostics_json") ?: error("No diagnostic response"))
                 check(report.managed && report.profile==row.profile && report.packageName==row.packageName) { "Diagnostic profile/app identity mismatch" }
