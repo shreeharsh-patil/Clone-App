@@ -1,0 +1,126 @@
+name: Android and Rust
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - name: Android SDK and NDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006'
+      - name: Pinned stable Rust
+        run: rustup show
+      - name: Rust tests
+        run: cargo test --manifest-path rust-core/Cargo.toml --locked
+      - name: Build both native ABIs
+        run: bash scripts/build-rust.sh
+      - name: Android tests, lint and APKs
+        run: |
+          chmod +x gradlew
+          ./gradlew :app:testDebugUnitTest :app:lintDebug :app:lintRelease :app:assembleDebug :app:assembleRelease :isolation-probe:assembleDebug --console=plain
+      - name: Verify APK native contents and page alignment
+        run: python3 scripts/verify-apk.py app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ParallelNest-debug-and-unsigned-release
+          path: |
+            app/build/outputs/apk/**/*.apk
+            isolation-probe/build/outputs/apk/debug/*.apk
+            app/build/reports/
+      - name: Assemble corresponding source archive
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: git archive --format=zip --output=ParallelNest-source.zip HEAD
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: ParallelNest-source
+          path: ParallelNest-source.zip
+  instrumented:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [33, 34, 35, 36]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-36' 'ndk;27.1.12297006'
+      - run: rustup show && bash scripts/build-rust.sh && chmod +x gradlew
+      - name: Enable KVM for emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          script: ./gradlew :app:connectedDebugAndroidTest --console=plain
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: instrumentation-results-api-${{ matrix.api }}
+          path: app/build/reports/androidTests/
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, instrumented]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    environment: release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ParallelNest-debug-and-unsigned-release
+          path: artifacts
+      - uses: actions/download-artifact@v4
+        with:
+          name: ParallelNest-source
+          path: artifacts/source
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'build-tools;36.0.0'
+      - name: Sign release when credentials are available
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:STORE_PASS --key-pass env:KEY_PASS --out artifacts/ParallelNest-release.apk artifacts/app/build/outputs/apk/release/app-release-unsigned.apk
+            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify artifacts/ParallelNest-release.apk
+          else
+            echo 'No production signing credentials: publish installable debug APK plus clearly named unsigned release.'
+          fi
+      - name: Publish alpha release and source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          find artifacts -name '*.apk' -o -name '*.zip' | sort > "$RUNNER_TEMP/assets.txt"
+          mapfile -t assets < "$RUNNER_TEMP/assets.txt"
+          gh release create "$GITHUB_REF_NAME" "${assets[@]}" --prerelease --title "ParallelNest $GITHUB_REF_NAME" --notes-file docs/RELEASE-NOTES.md

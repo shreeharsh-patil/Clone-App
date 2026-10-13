@@ -1,0 +1,1 @@
+-keep class org.parallelnest.app.core.NativeCore { *; }

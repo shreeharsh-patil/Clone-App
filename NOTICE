@@ -1,0 +1,12 @@
+ParallelNest
+Copyright 2026 ParallelNest contributors
+Licensed under the Apache License, Version 2.0.
+
+Original Kotlin/Compose and Rust implementation. Island, Shelter, BlackBox,
+NewBlackbox and VirtualApp were researched as references; their code and artwork
+are not incorporated. No virtual-container library or proprietary APK is bundled.
+
+Runtime dependency notices, versions and license texts are included in
+app/src/main/assets/third-party-notices.txt and licenses/.
+Android SDK/platform behavior is provided by the user's Android operating system.
+The first-party Nest Isolation Probe is licensed under the same Apache-2.0 license.
