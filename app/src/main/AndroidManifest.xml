@@ -30,6 +30,5 @@
         </receiver>
         <receiver android:name=".engine.OperationReceiver" android:exported="false" />
         <receiver android:name=".engine.NestPackageReceiver" android:exported="false"><intent-filter><action android:name="android.intent.action.MY_PACKAGE_REPLACED" /></intent-filter></receiver>
-        <activity android:name=".engine.InstallerResultActivity" android:exported="false" android:excludeFromRecents="true" />
     </application>
 </manifest>

@@ -1,7 +1,6 @@
 package org.parallelnest.app.engine
 
 import android.app.PendingIntent
-import android.app.ActivityOptions
 import android.app.admin.DevicePolicyManager
 import android.content.*
 import android.content.pm.PackageInstaller
@@ -17,9 +16,20 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.*
 import org.parallelnest.app.core.*
 import java.io.File
+import java.lang.ref.WeakReference
+import java.util.concurrent.ConcurrentHashMap
+
+private val activeWorkOperations = ConcurrentHashMap<String, WeakReference<WorkCommandActivity>>()
 
 class WorkCommandActivity : ComponentActivity() {
     private var callback: PendingIntent? = null
+    private var sessionId = -1
+    private val consent = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { result ->
+        if(result.resultCode == RESULT_CANCELED) {
+            if(sessionId >= 0) runCatching { packageManager.packageInstaller.abandonSession(sessionId) }
+            reply(false,"Installation cancelled in Android's confirmation screen")
+        }
+    }
     private val dpm by lazy { getSystemService(DevicePolicyManager::class.java) }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -27,6 +37,7 @@ class WorkCommandActivity : ComponentActivity() {
         callback = intent.getParcelableExtra("callback", PendingIntent::class.java)
         val authentic = callback?.let { it.creatorPackage == packageName && (it.creatorUid % 100_000) == (Process.myUid() % 100_000) } == true
         if (!authentic || !getSystemService(UserManager::class.java).isManagedProfile || !dpm.isProfileOwnerApp(packageName) || !BridgeAuth.verify(this, intent)) { finish(); return }
+        activeWorkOperations[intent.getStringExtra("nonce")!!] = WeakReference(this)
         setContent { MaterialTheme { Surface { Column(Modifier.padding(32.dp)) { Text("ParallelNest work profile", style = MaterialTheme.typography.headlineSmall); Spacer(Modifier.height(16.dp)); LinearProgressIndicator(); Text("Applying your requested profile operation…") } } } }
         lifecycleScope.launch {
             try {
@@ -52,7 +63,6 @@ class WorkCommandActivity : ComponentActivity() {
                     "delete" -> {
                         // Only this profile's PackageInstaller is used. Never the parent's.
                         packageManager.packageInstaller.uninstall(pkg, statusCallback(pkg, "delete").intentSender)
-                        finish()
                     }
                     "info" -> {
                         startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, android.net.Uri.fromParts("package", pkg, null)))
@@ -70,12 +80,9 @@ class WorkCommandActivity : ComponentActivity() {
     }
     private fun statusCallback(pkg: String, op: String): PendingIntent {
         val nonce = intent.getStringExtra("nonce")!!
-        val target = Intent(this, OperationReceiver::class.java).setAction("INSTALL.$nonce").putExtra("installer", true).putExtra("package", pkg).putExtra("operation", op).putExtra("parent_callback", callback)
+        val target = Intent(this, OperationReceiver::class.java).setAction("INSTALL.$nonce").putExtra("installer", true).putExtra("nonce",nonce).putExtra("session",sessionId).putExtra("package", pkg).putExtra("operation", op).putExtra("parent_callback", callback)
         // Explicit mutable callback required by PackageInstaller on target 35+.
-        val options = ActivityOptions.makeBasic()
-        if (Build.VERSION.SDK_INT >= 35) options.setPendingIntentCreatorBackgroundActivityStartMode(ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED)
-        target.setClass(this, InstallerResultActivity::class.java)
-        return PendingIntent.getActivity(this, nonce.hashCode(), target, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE, options.toBundle())
+        return PendingIntent.getBroadcast(this, nonce.hashCode(), target, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE)
     }
     private suspend fun install(pkg: String) {
         if (packageManager.getLaunchIntentForPackage(pkg) != null) { reply(true, "Existing work-profile app added; its data was preserved"); return }
@@ -96,6 +103,7 @@ class WorkCommandActivity : ComponentActivity() {
                 }
                 require(packageManager.getPackageArchiveInfo(files.first().path, PackageManager.PackageInfoFlags.of(0))?.packageName == pkg) { "APK package does not match selected app" }
                 id = installer.createSession(params)
+                sessionId = id
                 installer.openSession(id).use { session ->
                     files.forEachIndexed { index, file ->
                         ensureActive()
@@ -104,8 +112,15 @@ class WorkCommandActivity : ComponentActivity() {
                     session.commit(statusCallback(pkg, "install").intentSender)
                 }
             }
-            finish()
+            // Keep this foreground-capable Activity until the installer callback.
+            // Terminal broadcast results never need a background activity launch.
         } catch (e: Exception) { if (id >= 0) runCatching { installer.abandonSession(id) }; throw e }
+    }
+    fun confirmInstallation(consentIntent: Intent) { consent.launch(consentIntent) }
+    override fun onDestroy() {
+        val nonce=intent.getStringExtra("nonce")
+        if(nonce!=null && activeWorkOperations[nonce]?.get() === this) activeWorkOperations.remove(nonce)
+        super.onDestroy()
     }
 }
 
@@ -115,27 +130,24 @@ class OperationReceiver : BroadcastReceiver() {
             intent.getStringExtra("nonce")?.let { OperationMailbox.pending.remove(it)?.complete(intent) }
             return
         }
-        // Installer callbacks go through a private Activity, keeping consent launches foreground.
-    }
-}
-
-class InstallerResultActivity : ComponentActivity() {
-    private val consent = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { finish() }
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        val context = this
+        if(!context.getSystemService(UserManager::class.java).isManagedProfile || !context.getSystemService(DevicePolicyManager::class.java).isProfileOwnerApp(context.packageName)) return
+        val nonce=intent.getStringExtra("nonce").orEmpty()
+        val active=activeWorkOperations[nonce]?.get()
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         if (status == PackageInstaller.STATUS_PENDING_USER_ACTION) {
             val consent = intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java)
-            if (consent != null) {
-                try { this.consent.launch(consent); return } catch (_: Exception) { /* Return an explicit failure below. */ }
+            if (consent != null && active != null && !active.isFinishing) {
+                try { active.confirmInstallation(consent); return } catch (_: Exception) { /* Return an explicit failure below. */ }
             }
+            val id=intent.getIntExtra("session",-1)
+            if(id>=0)runCatching { context.packageManager.packageInstaller.abandonSession(id) }
         }
-        val parent = intent.getParcelableExtra("parent_callback", PendingIntent::class.java) ?: run { finish(); return }
+        val parent = intent.getParcelableExtra("parent_callback", PendingIntent::class.java) ?: return
         val success = status == PackageInstaller.STATUS_SUCCESS
         val result = Intent().putExtra("success", success).putExtra("profile", context.getSystemService(UserManager::class.java).getSerialNumberForUser(Process.myUserHandle()))
-            .putExtra("message", if (success) if (intent.getStringExtra("operation") == "delete") "Work-profile app deleted; personal data is untouched" else "App installed in a separate work profile" else intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Installation/deletion cancelled or blocked by Android")
+            .putExtra("message", if (success) if (intent.getStringExtra("operation") == "delete") "Work-profile app deleted; personal data is untouched" else "App installed in a separate work profile" else intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "Installation/deletion cancelled or blocked by Android. Retry with the work operation in the foreground.")
         runCatching { parent.send(context, 0, result) }
-        finish()
+        active?.finish()
+        activeWorkOperations.remove(nonce)
     }
 }
