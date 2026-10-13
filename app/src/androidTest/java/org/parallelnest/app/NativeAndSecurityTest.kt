@@ -28,5 +28,7 @@ class NativeAndSecurityTest {
         assertTrue(store.checkPin("654321".toCharArray()))
         repeat(5){assertFalse(store.checkPin("000000".toCharArray()))}
         assertFalse(store.checkPin("654321".toCharArray()))
+        store.setPin("123456".toCharArray())
+        assertTrue("A newly authenticated PIN change clears the old retry delay",store.checkPin("123456".toCharArray()))
     }
 }

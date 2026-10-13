@@ -14,11 +14,12 @@ import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 
+private val keystoreLock = Any()
 class SecureStore(context: Context) {
     private val prefs = context.getSharedPreferences("secure", Context.MODE_PRIVATE)
-    private val key: SecretKey get() {
+    private val key: SecretKey get() = synchronized(keystoreLock) {
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        return (store.getKey("nest-storage-v1", null) as? SecretKey) ?: KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
+        (store.getKey("nest-storage-v1", null) as? SecretKey) ?: KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
             init(KeyGenParameterSpec.Builder("nest-storage-v1", KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT).setBlockModes(KeyProperties.BLOCK_MODE_GCM).setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE).build())
         }.generateKey()
     }
@@ -33,17 +34,20 @@ class SecureStore(context: Context) {
     }
     fun newBridgeKey(): ByteArray = ByteArray(32).apply { SecureRandom().nextBytes(this) }.also { put("bridge", it) }
     fun hasPin() = prefs.contains("pin")
-    fun setPin(pin: CharArray) {
-        require(pin.size in 6..32 && pin.all { it.isDigit() }) { "PIN must have 6–32 digits" }
-        val salt = ByteArray(16).apply { SecureRandom().nextBytes(this) }
-        put("pin", salt + derive(pin, salt))
-        pin.fill('\u0000')
+    @Synchronized fun setPin(pin: CharArray) {
+        try {
+            require(pin.size in 6..32 && pin.all { it.isDigit() }) { "PIN must have 6–32 digits" }
+            val salt = ByteArray(16).apply { SecureRandom().nextBytes(this) }
+            put("pin", salt + derive(pin, salt))
+            check(prefs.edit().remove("attempts").remove("blocked_until").commit())
+        } finally { pin.fill('\u0000') }
     }
     private fun derive(pin: CharArray, salt: ByteArray): ByteArray {
         val spec = PBEKeySpec(pin, salt, 210_000, 256)
         return try { SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded } finally { spec.clearPassword() }
     }
     @Synchronized fun checkPin(pin: CharArray): Boolean {
+      try {
         val until = prefs.getLong("blocked_until", 0)
         if (System.currentTimeMillis() < until) { pin.fill('\u0000'); return false }
         val data = get("pin") ?: return false
@@ -52,5 +56,6 @@ class SecureStore(context: Context) {
         val attempts = if (matches) 0 else prefs.getInt("attempts", 0) + 1
         prefs.edit().putInt("attempts", attempts).putLong("blocked_until", if (attempts >= 5) System.currentTimeMillis() + 30_000 else 0).commit()
         return matches
+      } finally { pin.fill('\u0000') }
     }
 }

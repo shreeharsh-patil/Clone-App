@@ -8,6 +8,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.UUID
 
 private val Context.nestData by preferencesDataStore("nest")
 object NativeCore {
@@ -15,6 +16,14 @@ object NativeCore {
     @JvmStatic external fun canonicalize(input: String): String
 }
 object RegistryCodec {
+    fun mergeRestored(old: List<CloneInfo>, incoming: List<CloneInfo>): List<CloneInfo> {
+        val restored = incoming.associateBy { it.packageName to it.profile }
+        val merged = old.map { row -> restored[row.packageName to row.profile]?.copy(id=row.id, locked=false) ?: row }.toMutableList()
+        incoming.filter { row -> old.none { it.packageName == row.packageName && it.profile == row.profile } }.forEach { row ->
+            merged += row.copy(id=if(merged.any { it.id==row.id }) UUID.randomUUID().toString() else row.id, locked=false)
+        }
+        return merged
+    }
     fun encode(rows: List<CloneInfo>): String = JSONObject().put("schema", 1).put("instances", JSONArray().apply {
         rows.forEach { r -> put(JSONObject().put("id", r.id).put("package", r.packageName).put("name", r.name).put("profile", r.profile).put("created", r.created).put("last_launch", r.lastLaunch).put("locked", r.locked).put("accent", r.accent)) }
     }).toString()
@@ -48,8 +57,8 @@ class Registry(private val context: Context) {
         val theme = root.optString("theme", "system")
         require(theme in listOf("system", "light", "dark"))
         context.nestData.edit { p ->
-            val old = RegistryCodec.decode(p[key] ?: empty)
-            p[key] = NativeCore.canonicalize(RegistryCodec.encode(old + incoming.filter { r -> old.none { it.packageName == r.packageName && it.profile == r.profile || it.id == r.id } }))
+            val old = RegistryCodec.decode(NativeCore.canonicalize(p[key] ?: empty))
+            p[key] = NativeCore.canonicalize(RegistryCodec.encode(RegistryCodec.mergeRestored(old,incoming)))
             p[stringPreferencesKey("theme")] = theme
             p[booleanPreferencesKey("dynamic")] = root.optBoolean("dynamic", true)
             p[booleanPreferencesKey("grid")] = root.optBoolean("grid", false)

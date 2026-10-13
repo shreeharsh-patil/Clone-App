@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.sync.Mutex
 import org.parallelnest.app.NestApplication
 import org.parallelnest.app.core.*
 
@@ -14,13 +15,14 @@ class NestViewModel(app: Application) : AndroidViewModel(app) {
     private val nest = app as NestApplication
     val engine = nest.engine
     val registry = nest.registry
+    private val operation = Mutex()
     private val mutable = MutableStateFlow(NestState())
     val state = mutable.asStateFlow()
     init {
         viewModelScope.launch {
-            registry.settings.collect { p -> mutable.update { it.copy(onboarded = p[booleanPreferencesKey("onboarded")] ?: false, theme = p[stringPreferencesKey("theme")] ?: "system", dynamic = p[booleanPreferencesKey("dynamic")] ?: true, grid = p[booleanPreferencesKey("grid")] ?: false) } }
+            registry.settings.catch { report("Unable to read settings: ${it.message}") }.collect { p -> mutable.update { it.copy(onboarded = p[booleanPreferencesKey("onboarded")] ?: false, theme = p[stringPreferencesKey("theme")] ?: "system", dynamic = p[booleanPreferencesKey("dynamic")] ?: true, grid = p[booleanPreferencesKey("grid")] ?: false) } }
         }
-        viewModelScope.launch { registry.instances.collect { refresh() } }
+        viewModelScope.launch { registry.instances.catch { report("Unable to read app metadata: ${it.message}") }.collect { refresh() } }
         refresh()
     }
     fun refresh() { viewModelScope.launch(Dispatchers.IO) { try { val profile = engine.status(); val rows = engine.getInstances(); mutable.update { it.copy(profile = profile, instances = rows) } } catch (e: Exception) { report(e.message ?: "Unable to read registry") } } }
@@ -28,9 +30,9 @@ class NestViewModel(app: Application) : AndroidViewModel(app) {
     fun report(message: String) { mutable.update { it.copy(message = message) } }
     fun clearMessage() { mutable.update { it.copy(message = null) } }
     private suspend fun runOperation(block: suspend () -> OperationResult?) {
-        if (mutable.value.busy) return
+        if (!operation.tryLock()) return
         mutable.update { it.copy(busy = true) }
-        try { block()?.let { report(it.message) } } catch (e: CancellationException) { throw e } catch (e: Exception) { report(e.message ?: "Operation failed") } finally { mutable.update { it.copy(busy = false) }; refresh() }
+        try { block()?.let { report(it.message) } } catch (e: CancellationException) { throw e } catch (e: Exception) { report(e.message ?: "Operation failed") } finally { mutable.update { it.copy(busy = false) }; operation.unlock(); refresh() }
     }
     fun create(app: AppInfo, name: String) { viewModelScope.launch { runOperation { engine.createInstance(app, name) } } }
     fun launch(row: CloneInfo) { viewModelScope.launch { runOperation { engine.launchInstance(row) } } }
