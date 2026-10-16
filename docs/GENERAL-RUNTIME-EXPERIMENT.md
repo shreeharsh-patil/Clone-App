@@ -9,10 +9,10 @@ Activity resumption, and registry persistence are required before a clone is
 reported as created. This does **not** establish compatibility with every app.
 
 The experiment installs as `org.parallelnest.app.experimental`, version
-`0.4.0-experimental` (6). It can coexist with the published
+`0.4.1-experimental` (7). It can coexist with the published
 `org.parallelnest.app` prototype. Production signing, existing production data,
-and legacy work profiles are preserved. The public 0.3 release remains the
-probe-only prototype; it has not been replaced with this experiment.
+and legacy work profiles are preserved. The existing 0.4.0 experiment remains
+the published build; this 0.4.1 candidate is not yet a public release.
 
 ## Build from source
 
@@ -108,14 +108,20 @@ The split fixture is generated from repository source and is **not** counted
 as one of the two ordinary third-party apps.
 
 The [machine-readable result](evidence/general-runtime-api35.json) records the
-device fingerprint, exact APK hashes, source manifest and remaining checks.
-The local production-signed candidate is
+device fingerprint, exact APK hashes, source manifest and remaining checks for
+version 0.4.0. The [0.4.1 launch-fix result](evidence/general-runtime-launch-api35.json)
+records the updated build and its emulator check. The previously published
+production-signed candidate was
 `artifacts/general-runtime/candidate/Clone-Apps-v0.4.0-experimental.apk`, SHA-256
 `48bbcf2cb792e61b68a814d0be6331cc2e91914541401af5dd2999290a35b381`.
-Its certificate matches the existing production identity. Emulator minified
+The new local production-signed 0.4.1 candidate is
+`artifacts/general-runtime/fix-v0.4.1/Clone-Apps-v0.4.1-experimental.apk`,
+SHA-256 `2eee47bf67c03634901eae4bc33786d2726b873bb1ed79ea7043a7fa485c8867`.
+Both certificates match the existing production identity. Emulator minified
 execution used a debug-signed copy to retain that test installation's data;
-all non-`META-INF` ZIP entry hashes match the candidate exactly. Do not
-uninstall an existing app to force a signing-key change.
+the 0.4.0 test copy's non-`META-INF` ZIP entry hashes matched its production
+candidate exactly. Do not uninstall an existing app to force a signing-key
+change.
 
 ### Startup fix
 
@@ -127,6 +133,24 @@ A slow-start notice leaves the pending connection active and readiness
 refreshes automatically. This avoids making a slow connection a permanent
 error. Fresh boot verification of this final revision must be recorded
 separately from the earlier reboot/data-preservation result.
+
+### Clone launch responsiveness fix (0.4.1)
+
+The clone launch request crosses synchronous runtime Binder services while a
+guest process and its Activity are prepared. The previous adapter dispatched
+that request on the dashboard main thread and only began its timeout after the
+request returned, so a slow launch could trigger an Android not-responding
+dialog. The request now runs on `Dispatchers.IO`, and the 25-second deadline
+covers both the runtime request and the guest-resume handshake. A timeout
+reports which stage did not finish and leaves the dashboard responsive.
+
+On the Android 15 / API 35 x86_64 emulator, the minified 0.4.1 test build was
+installed over version 0.4.0 without clearing data. The host cold-started in
+499 ms after a force-stop. Opening the saved Fossify Notes clone resumed its
+guest Activity and showed its existing note. Android reported no ANR. The
+device UI automation bridge returned no accessibility root for the guest
+window, so this check used the screen capture and activity/process state. This
+does not replace the pending physical ARM64 and fresh-reboot acceptance checks.
 
 ## Remaining acceptance gates
 

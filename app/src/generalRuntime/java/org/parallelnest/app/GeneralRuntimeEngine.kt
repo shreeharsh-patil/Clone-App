@@ -73,10 +73,15 @@ class GeneralRuntimeEngine(private val context: Context, private val registry: R
         val reply = File(events, "$user.reply.json")
         reply.delete()
         request.writeText(JSONObject().put("token", token).put("package", pkg).put("user", user).toString())
+        var launchRequestReturned = false
         try {
-            val requested = withContext(Dispatchers.Main) { box.launchApk(pkg, user) }
-            check(requested) { "The guest has no launchable Activity" }
             return withTimeout(25_000) {
+                // BlackBoxCore.launchApk crosses into the runtime's Binder services and can
+                // wait while a guest process is prepared. Never make that synchronous call
+                // on the dashboard's main thread.
+                val requested = withContext(Dispatchers.IO) { box.launchApk(pkg, user) }
+                launchRequestReturned = true
+                check(requested) { "The guest has no launchable Activity" }
                 while (true) {
                     val event = runCatching { JSONObject(reply.readText()) }.getOrNull()
                     if (event?.optString("token") == token && event.optString("package") == pkg && event.optInt("user") == user) {
@@ -87,7 +92,11 @@ class GeneralRuntimeEngine(private val context: Context, private val registry: R
                 @Suppress("UNREACHABLE_CODE") error("No guest lifecycle reply")
             }
         } catch (e: TimeoutCancellationException) {
-            error("Guest did not resume within 25 seconds. No successful clone is recorded; inspect its runtime error.")
+            if (launchRequestReturned) {
+                error("The guest did not resume within 25 seconds. No successful clone is recorded; inspect its runtime error.")
+            } else {
+                error("The runtime launch request did not finish within 25 seconds. The dashboard remains available; no successful clone is recorded.")
+            }
         } finally { request.delete(); reply.delete() }
     }
 

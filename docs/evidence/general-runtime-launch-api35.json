@@ -1,0 +1,29 @@
+{
+  "date": "2026-10-16",
+  "application_id": "org.parallelnest.app.experimental",
+  "version_name": "0.4.1-experimental",
+  "version_code": 7,
+  "production_candidate_sha256": "2eee47bf67c03634901eae4bc33786d2726b873bb1ed79ea7043a7fa485c8867",
+  "production_certificate_sha256": "e041ea9a514979e5c956a2178dc4f8b8a407ed10cc79beecc5db8c86c1723d05",
+  "emulator_test_apk_sha256": "0e06dd32e434e4eb68f9f462d036d911faeaa47733ba586358468f2f0811f70b",
+  "device": {
+    "serial": "emulator-5564",
+    "api": 35,
+    "android_version": "15",
+    "abi": "x86_64",
+    "physical": false
+  },
+  "checks": {
+    "installation": "Release-minified payload installed over 0.4.0 with the same debug certificate as the existing emulator test install; app data was retained.",
+    "host_cold_start": "After am force-stop, am start -W reported LaunchState COLD, TotalTime 499 ms, WaitTime 501 ms.",
+    "clone_launch": "Fossify Notes clone opened in ProxyActivity after host cold start; saved note text was visible in the guest screen capture.",
+    "anr": "dumpsys activity lastanr reported no ANR since boot.",
+    "native_packaging": "All eight ARM64 and x86_64 native libraries passed APK ZIP and ELF 16 KiB alignment checks.",
+    "production_signing": "Candidate signature verified with the existing production certificate."
+  },
+  "local_screen_capture": "artifacts/general-runtime/fix-v0.4.1/notes-clone-after-back.png",
+  "pending": [
+    "Unrooted Android 15 ARM64 physical-device execution",
+    "Fresh reboot of the final revision before publishing the candidate"
+  ]
+}
