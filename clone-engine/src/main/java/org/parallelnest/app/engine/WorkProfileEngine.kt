@@ -27,7 +27,8 @@ class WorkProfileEngine(private val context: Context, private val registry: Regi
     private fun forwarder(): ComponentName? = pm.queryIntentActivities(Intent(WORK_COMMAND), PackageManager.ResolveInfoFlags.of(0)).firstOrNull {
         it.activityInfo.packageName == "android" && it.activityInfo.name.endsWith("ForwardIntentToManagedProfile")
     }?.activityInfo?.let { ComponentName(it.packageName, it.name) }
-    override fun status(): ProfileState {
+    override fun status() = legacyStatus().let { EngineState("work_profile", it.bridgeAvailable, false, it.description) }
+    fun legacyStatus(): ProfileState {
         val managed = users.isManagedProfile
         val supported = pm.hasSystemFeature(PackageManager.FEATURE_MANAGED_USERS)
         val others = users.userProfiles.any { it != Process.myUserHandle() }
@@ -43,13 +44,6 @@ class WorkProfileEngine(private val context: Context, private val registry: Regi
             else -> "Set up a work profile to create one separate copy per app"
         }
         return ProfileState(managed, supported, provision, others, bridge, reason)
-    }
-    fun provisioningIntent(): Intent {
-        check(status().canProvision) { status().description }
-        val token = SecureStore(context).newBridgeKey()
-        return Intent(DevicePolicyManager.ACTION_PROVISION_MANAGED_PROFILE).putExtra(DevicePolicyManager.EXTRA_PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME, admin(context))
-            .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_ALLOW_OFFLINE, true)
-            .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE, PersistableBundle().apply { putString("bridge-key", android.util.Base64.encodeToString(token, android.util.Base64.NO_WRAP)) })
     }
     override suspend fun listSupportedApps(): List<AppInfo> = withContext(Dispatchers.IO) {
         pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), PackageManager.ResolveInfoFlags.of(0)).map { it.activityInfo.applicationInfo }.distinctBy { it.packageName }.filter { it.packageName != context.packageName }.map { app ->
@@ -86,7 +80,7 @@ class WorkProfileEngine(private val context: Context, private val registry: Regi
             ?: return@withLock OperationResult(false,"The original app is no longer installed or has no launcher activity. Refresh Device Apps.")
         if (!currentApp.supported) return@withLock OperationResult(false, currentApp.reason)
         progress(CreationStage.PREPARING)
-        check(status().bridgeAvailable) { status().description }
+        check(status().ready) { status().description }
         progress(CreationStage.ANDROID)
         val reply = request(if(currentApp.system) "enable_system" else "install", currentApp.packageName, name.trim(), if(currentApp.system)emptyList() else currentApp.paths)
         if (reply.getBooleanExtra("success", false)) {
@@ -116,12 +110,12 @@ class WorkProfileEngine(private val context: Context, private val registry: Regi
         val packages = reply.getStringArrayListExtra("packages").orEmpty()
         val labels = reply.getStringArrayListExtra("labels").orEmpty()
         registry.reconcileCreations(packages.toSet(),serial)
-        registry.update { old -> old + packages.mapIndexedNotNull { i, pkg -> if (old.any { it.packageName == pkg && it.profile == serial }) null else CloneInfo(UUID.randomUUID().toString(), pkg, labels.getOrElse(i) { pkg }.take(80), serial, System.currentTimeMillis()) } }
+        registry.update { old -> old + packages.mapIndexedNotNull { i, pkg -> if (old.any { it.engine == "work_profile" && it.packageName == pkg && it.profile == serial }) null else CloneInfo(UUID.randomUUID().toString(), pkg, labels.getOrElse(i) { pkg }.take(80), serial, System.currentTimeMillis()) } }
         return OperationResult(true, "Installed work apps synchronized")
     }
     override suspend fun getInstances(): List<CloneInfo> = withContext(Dispatchers.IO) {
         val profiles = users.userProfiles.filter { it != Process.myUserHandle() }.associateBy { users.getSerialNumberForUser(it) }
-        registry.instances.first().mapNotNull { row ->
+        registry.instances.first().filter { it.engine == "work_profile" }.mapNotNull { row ->
             val user = profiles[row.profile] ?: return@mapNotNull null
             // A paused profile remains installed; do not delete its metadata.
             if (users.isQuietModeEnabled(user)) row.copy(paused=true)

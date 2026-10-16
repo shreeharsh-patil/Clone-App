@@ -5,9 +5,10 @@ import org.parallelnest.app.core.Registry
 import org.parallelnest.app.engine.WorkProfileEngine
 import org.parallelnest.app.engine.api.CloneEngine
 import org.parallelnest.app.engine.api.NestServices
+import org.parallelnest.app.engine.virtualization.VirtualContainerEngine
 
 class NestApplication : Application(), NestServices {
     override val registry by lazy { Registry(this) }
     override val profileEngine by lazy { WorkProfileEngine(this, registry) }
-    override val engine: CloneEngine get() = profileEngine
+    override val engine: CloneEngine by lazy { VirtualContainerEngine(this, registry) }
 }

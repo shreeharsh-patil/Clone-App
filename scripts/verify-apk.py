@@ -4,8 +4,11 @@ import sys
 import zipfile
 
 with zipfile.ZipFile(sys.argv[1]) as apk, open(sys.argv[1], 'rb') as stream:
-    for abi in ('arm64-v8a', 'x86_64'):
-        name = f'lib/{abi}/libparallelnest_core.so'
+    required = {f'lib/{abi}/libparallelnest_core.so' for abi in ('arm64-v8a', 'x86_64')}
+    native = {name for name in apk.namelist() if name.startswith('lib/') and name.endswith('.so')}
+    assert required <= native, f'Missing required Rust ABIs: {required-native}'
+    # Framework/transitive native libraries need the same checks as our own JNI library.
+    for name in sorted(native):
         entry = apk.getinfo(name)
         assert entry.compress_type == zipfile.ZIP_STORED, f'{name} must be uncompressed'
         stream.seek(entry.header_offset)

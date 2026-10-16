@@ -12,8 +12,8 @@ android {
         applicationId = "org.parallelnest.app"
         minSdk = 33
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.2.0-alpha"
+        versionCode = 4
+        versionName = "0.3.0-prototype"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
@@ -56,6 +56,7 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.3.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
     androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
+    androidTestImplementation("androidx.room:room-runtime:2.8.5")
     androidTestImplementation(platform("androidx.compose:compose-bom:2026.03.00"))
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
     debugImplementation("androidx.compose.ui:ui-test-manifest")

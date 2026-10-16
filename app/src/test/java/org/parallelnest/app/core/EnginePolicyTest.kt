@@ -5,8 +5,9 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class EnginePolicyTest {
-    @Test fun virtualEngineNeverClaimsAvailability() {
-        assertFalse(VirtualContainerEngine.verified)
-        assertTrue(VirtualContainerEngine.reason.contains("one additional copy"))
+    @Test fun prototypeExplicitlyDeclaresUnsupportedGeneralApps() {
+        assertTrue(VirtualContainerEngine.reason.contains("prototype"))
+        assertTrue(VirtualContainerEngine.reason.contains("unsupported"))
+        assertTrue(VirtualContainerEngine.reason.contains("host UID"))
     }
 }

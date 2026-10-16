@@ -19,8 +19,8 @@ object AppCatalog {
     fun toggle(selected: List<String>,pkg: String)=if(pkg in selected) selected-pkg else selected+pkg
 }
 data class CreationState(val current: AppInfo?=null,val stage: String="Checking compatibility",val total: Int=0,val finished: Int=0,val running: Boolean=false,val outcomes: List<String> = emptyList(),val cancelRemaining: Boolean=false)
-data class NestState(val profile: ProfileState?=null,val instances: List<CloneInfo> = emptyList(),val apps: List<AppInfo> = emptyList(),val busy: Boolean=false,val message: String?=null,
-    val theme: String="dark",val selection: List<String> = emptyList(),val query: String="",val creation: CreationState=CreationState(),val report: CompatibilityReport?=null,val diagnosticBusy: Boolean=false)
+data class NestState(val runtime: EngineState?=null,val instances: List<CloneInfo> = emptyList(),val apps: List<AppInfo> = emptyList(),val busy: Boolean=false,val message: String?=null,
+    val theme: String="dark",val selection: List<String> = emptyList(),val query: String="",val creation: CreationState=CreationState(),val report: CompatibilityReport?=null,val diagnosticBusy: Boolean=false,val legacy: List<CloneInfo> = emptyList())
 class NestViewModel(app: Application,private val saved: SavedStateHandle): AndroidViewModel(app) {
     private val nest=app as NestServices
     val engine=nest.engine
@@ -36,13 +36,13 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
         refresh()
     }
     fun refresh() { viewModelScope.launch(Dispatchers.IO) {
-        try { val profile=engine.status();val rows=engine.getInstances();withContext(Dispatchers.Main) { val left=state.value.selection.filter { pkg -> rows.none { it.packageName==pkg } };saved["selection"]=left;mutable.update { it.copy(profile=profile,instances=rows,selection=left) } } }
+        try { val runtime=engine.status();val rows=engine.getInstances();val legacy=registry.snapshot().filter { it.engine=="work_profile" };mutable.update { it.copy(runtime=runtime,instances=rows,legacy=legacy) } }
         catch(e:CancellationException){throw e}catch(e:Exception){report(e.message ?: "Could not read instances")}
     } }
     fun report(message: String) { mutable.update { it.copy(message=message) } }
     fun clearMessage() { mutable.update { it.copy(message=null) } }
-    private suspend fun runOperation(block: suspend ()->OperationResult?) {
-        if(!operation.tryLock())return
+    private suspend fun runOperation(queue: Boolean=false,block: suspend ()->OperationResult?) {
+        if(queue)operation.lock() else if(!operation.tryLock())return
         mutable.update { it.copy(busy=true) }
         try { block()?.let { report(it.message) } }
         catch(e:CancellationException){throw e}catch(e:Exception){report(e.message ?: "Operation failed")}
@@ -51,14 +51,14 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
     fun discover() { viewModelScope.launch { runOperation { val apps=engine.listSupportedApps();mutable.update { it.copy(apps=apps) };null } } }
     fun query(value: String) { saved["query"]=value;mutable.update { it.copy(query=value) } }
     fun select(pkg: String) {
-        if(state.value.busy || state.value.apps.none { it.packageName==pkg && it.supported } || state.value.instances.any { it.packageName==pkg })return
+        if(state.value.busy || state.value.apps.none { it.packageName==pkg && it.supported })return
         val selected=AppCatalog.toggle(state.value.selection,pkg);saved["selection"]=selected;mutable.update { it.copy(selection=selected) }
     }
     fun clearSelection() { saved["selection"]=emptyList<String>();mutable.update { it.copy(selection=emptyList()) } }
     fun createSelected() {
         val picks=state.value.selection.mapNotNull { pkg -> state.value.apps.find { it.packageName==pkg && it.supported } }
         if(picks.isEmpty()) { report("Select at least one eligible installed app");return }
-        if(!engine.status().bridgeAvailable) { report(engine.status().description);return }
+        if(!engine.status().ready) { report(engine.status().description);return }
         viewModelScope.launch { runOperation {
             mutable.update { it.copy(creation=CreationState(total=picks.size,running=true)) }
             try {
@@ -75,15 +75,22 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
         } }
     }
     fun cancelRemaining() { mutable.update { it.copy(creation=it.creation.copy(cancelRemaining=true)) } }
-    fun launch(row: CloneInfo) { viewModelScope.launch { runOperation { engine.launchInstance(row) } } }
+    fun launch(row: CloneInfo) { viewModelScope.launch { runOperation(queue=true) { engine.launchInstance(row) } } }
+    fun launchShortcut(id: String) { viewModelScope.launch { runOperation(queue=true) {
+        val row=engine.getInstances().find { it.id==id }
+        if(row==null)OperationResult(false,"This guest instance is unavailable") else engine.launchInstance(row)
+    } } }
     fun freeze(row: CloneInfo) { viewModelScope.launch { runOperation { engine.stopInstance(row) } } }
     fun delete(row: CloneInfo) { viewModelScope.launch { runOperation { engine.deleteInstance(row) } } }
-    fun synchronize() { viewModelScope.launch { runOperation { if(engine.status().bridgeAvailable)profileEngine.adoptProfileApps() else { refresh();OperationResult(false,engine.status().description) } } } }
-    fun info(row: CloneInfo) { viewModelScope.launch { runOperation { val r=profileEngine.request("info",row.packageName);OperationResult(r.getBooleanExtra("success",false),r.getStringExtra("message").orEmpty()) } } }
-    fun rename(row: CloneInfo,name: String) { viewModelScope.launch { runOperation { profileEngine.rename(row,name);OperationResult(true,"Name updated") } } }
-    fun accent(row: CloneInfo,value: Int) { viewModelScope.launch { runOperation { profileEngine.accent(row,value);OperationResult(true,"Instance icon style updated") } } }
+    fun synchronize() { refresh() }
+    fun info(row: CloneInfo) { report("${row.packageName} · clone ${row.number} · ${row.runtime}\nVersion ${row.versionCode} · ${row.abi}\nPer-instance files, preferences, cache and SQLite. ${row.compatibility} compatibility; host UID shared.") }
+    fun rename(row: CloneInfo,name: String) { viewModelScope.launch { runOperation { registry.update { rows -> rows.map { if(it.id==row.id)it.copy(name=name.trim()) else it } };OperationResult(true,"Name updated") } } }
+    fun accent(row: CloneInfo,value: Int) { viewModelScope.launch { runOperation { registry.update { rows -> rows.map { if(it.id==row.id)it.copy(accent=value) else it } };OperationResult(true,"Instance icon style updated") } } }
+    fun update(row: CloneInfo) { viewModelScope.launch { runOperation { engine.updateInstance(row) } } }
+    fun launchLegacy(row: CloneInfo) { viewModelScope.launch { runOperation { profileEngine.launchInstance(row) } } }
     fun theme(value: String) { viewModelScope.launch { registry.textSetting("theme",value) } }
     fun diagnostics(row: CloneInfo) {
+        if(row.engine=="virtual") { report(engine.status().description + "\nInstance: ${row.runtime}");return }
         viewModelScope.launch {
             if(state.value.diagnosticBusy)return@launch
             mutable.update { it.copy(diagnosticBusy=true,report=null) }

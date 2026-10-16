@@ -1,3 +1,5 @@
+> Historical work-profile release document. The current feature branch uses the limited first-party Activity runtime; see [runtime architecture](VIRTUAL-RUNTIME.md), [candidate audit](VIRTUAL-RUNTIME-AUDIT.md) and [current compatibility evidence](VIRTUAL-COMPATIBILITY.md).
+
 # Security review, 13 October 2026
 
 This is a code/dependency review and emulator verification, not a third-party penetration-test certification.

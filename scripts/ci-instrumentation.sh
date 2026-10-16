@@ -4,14 +4,11 @@ api="${1:?API argument required}"
 mkdir -p build/device-evidence
 # Capture test-emulator diagnostics before the runner tears it down, including on failure.
 trap 'adb logcat -d > build/device-evidence/runtime.log 2>&1 || true; adb shell dumpsys meminfo > build/device-evidence/memory.txt 2>&1 || true' EXIT
-adb install -r isolation-probe/build/outputs/apk/debug/isolation-probe-debug.apk
-./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.profileFlow=true --console=plain
-if [ "$api" = '36' ]; then
-  mkdir -p build/device-evidence
-  adb pull /sdcard/Android/data/org.parallelnest.app/files/evidence build/device-evidence
-  python3 scripts/verify-device-recovery.py
-  adb install -r app/build/outputs/apk/debug/app-debug.apk
-  adb install -r app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
-  adb shell am instrument -w -r -e class org.parallelnest.app.RecoveryDeletionTest -e deleteFlow true org.parallelnest.app.test/androidx.test.runner.AndroidJUnitRunner | tee build/deletion-result.txt
-  grep -q 'OK (1 test)' build/deletion-result.txt
-fi
+./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :isolation-probe:assembleDebug --console=plain
+# Preserve the baseline while producing a genuinely newer first-party guest APK.
+mkdir -p build/probe-updates
+cp isolation-probe/build/outputs/apk/debug/isolation-probe-debug.apk build/probe-updates/probe-v1.apk
+./gradlew :isolation-probe:assembleDebug -PprobeVersionCode=2 --console=plain
+cp isolation-probe/build/outputs/apk/debug/isolation-probe-debug.apk build/probe-updates/probe-v2.apk
+cp build/probe-updates/probe-v1.apk isolation-probe/build/outputs/apk/debug/isolation-probe-debug.apk
+python3 scripts/test-virtual-runtime.py --api "$api" --reboot --host-update --guest-update-apk build/probe-updates/probe-v2.apk

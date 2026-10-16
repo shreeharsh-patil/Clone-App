@@ -1,4 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Retained solely for explicit removal of historical work-profile copies. -->
     <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+    <application>
+        <receiver android:name="org.parallelnest.app.engine.virtualization.GuestResultReceiver" android:exported="false" />
+        <receiver android:name="org.parallelnest.app.engine.virtualization.GuestStop0Receiver" android:exported="false" android:process=":guest0" />
+        <receiver android:name="org.parallelnest.app.engine.virtualization.GuestStop1Receiver" android:exported="false" android:process=":guest1" />
+        <activity android:name="org.parallelnest.app.engine.virtualization.GuestSlot0Activity" android:exported="false" android:process=":guest0" android:taskAffinity="org.parallelnest.app.guest0" android:launchMode="singleTask" android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+        <activity android:name="org.parallelnest.app.engine.virtualization.GuestSlot1Activity" android:exported="false" android:process=":guest1" android:taskAffinity="org.parallelnest.app.guest1" android:launchMode="singleTask" android:theme="@android:style/Theme.Material.Light.NoActionBar" />
+    </application>
 </manifest>

@@ -1,3 +1,5 @@
+> Historical work-profile release document. The current feature branch uses the limited first-party Activity runtime; see [runtime architecture](VIRTUAL-RUNTIME.md), [candidate audit](VIRTUAL-RUNTIME-AUDIT.md) and [current compatibility evidence](VIRTUAL-COMPATIBILITY.md).
+
 # Executed test results
 
 Evaluation date: 13 October 2026. Clone Apps v0.2.0-alpha targets Android 13–16 (API 33–36). The user requested emulators; no physical phone, headset or BLE accessory was available. Builds/API observations are separate from physical hardware acceptance.
