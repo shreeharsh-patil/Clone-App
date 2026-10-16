@@ -77,7 +77,7 @@ try:
         instrument('runtime', ['VirtualRuntimeTest'])
         instrument('regressions', ['GuestHostingProofTest', 'VirtualStorageSecurityTest', 'DatabaseMigrationTest',
                                   'WorkProfileFlowTest', 'RecoveryDeletionTest', 'NativeAndSecurityTest',
-                                  'OnboardingTest', 'BluetoothFeatureTest', 'VirtualDashboardTest', 'ShortcutRoutingTest'])
+                                  'OnboardingTest', 'BluetoothFeatureTest', 'VirtualDashboardTest', 'ShortcutRoutingTest', 'AppCompatibilityPickerTest'])
     adb('shell', 'am', 'force-stop', 'org.parallelnest.app')
     instrument('after-force-stop', ['VirtualRecoveryTest'])
     if ARGS.reboot:

@@ -17,9 +17,13 @@ object AppCatalog {
     fun filter(apps: List<AppInfo>,query: String)=apps.filter { it.label.contains(query.trim(),true) || it.packageName.contains(query.trim(),true) }.sortedBy { it.label.lowercase() }
     fun hot(apps: List<AppInfo>)=apps.filter { it.packageName in popular }
     fun toggle(selected: List<String>,pkg: String)=if(pkg in selected) selected-pkg else selected+pkg
+    fun availableSelection(selected: List<String>,apps: List<AppInfo>): List<String> {
+        val available=apps.filter { it.supported }.map { it.packageName }.toSet()
+        return selected.distinct().filter { it in available }
+    }
 }
 data class CreationState(val current: AppInfo?=null,val stage: String="Checking compatibility",val total: Int=0,val finished: Int=0,val running: Boolean=false,val outcomes: List<String> = emptyList(),val cancelRemaining: Boolean=false)
-data class NestState(val runtime: EngineState?=null,val instances: List<CloneInfo> = emptyList(),val apps: List<AppInfo> = emptyList(),val busy: Boolean=false,val message: String?=null,
+data class NestState(val runtime: EngineState?=null,val instances: List<CloneInfo> = emptyList(),val apps: List<AppInfo> = emptyList(),val busy: Boolean=false,val message: String?=null,val discoveryComplete: Boolean=false,
     val theme: String="dark",val selection: List<String> = emptyList(),val query: String="",val creation: CreationState=CreationState(),val report: CompatibilityReport?=null,val diagnosticBusy: Boolean=false,val legacy: List<CloneInfo> = emptyList())
 class NestViewModel(app: Application,private val saved: SavedStateHandle): AndroidViewModel(app) {
     private val nest=app as NestServices
@@ -30,6 +34,11 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
     private val mutable=MutableStateFlow(NestState(selection=saved["selection"] ?: emptyList(),query=saved["query"] ?: ""))
     val state=mutable.asStateFlow()
     init {
+        viewModelScope.launch { engine.changes.collect {
+            refresh()
+            while(state.value.busy)delay(100)
+            if(state.value.discoveryComplete)discover()
+        } }
         viewModelScope.launch { registry.settings.catch { report("Unable to read preferences: ${it.message}") }.collect { p -> mutable.update { it.copy(theme=p[stringPreferencesKey("theme")] ?: "dark") } } }
         viewModelScope.launch { registry.instances.catch { report("Unable to read metadata: ${it.message}") }.collect { refresh() } }
         viewModelScope.launch(Dispatchers.IO) { try { if(registry.pendingCreations().isNotEmpty()) report("An installation was interrupted. Refresh Apps to recover any completed work copies.") } catch(e:CancellationException){throw e}catch(e:Exception){report(e.message ?: "Metadata recovery failed")} }
@@ -48,10 +57,18 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
         catch(e:CancellationException){throw e}catch(e:Exception){report(e.message ?: "Operation failed")}
         finally { mutable.update { it.copy(busy=false) };operation.unlock();refresh() }
     }
-    fun discover() { viewModelScope.launch { runOperation { val apps=engine.listSupportedApps();mutable.update { it.copy(apps=apps) };null } } }
+    fun discover() { viewModelScope.launch { runOperation {
+        val apps=engine.listSupportedApps()
+        val selected=AppCatalog.availableSelection(state.value.selection,apps)
+        saved["selection"]=selected
+        mutable.update { it.copy(apps=apps,selection=selected,discoveryComplete=true) }
+        null
+    } } }
     fun query(value: String) { saved["query"]=value;mutable.update { it.copy(query=value) } }
     fun select(pkg: String) {
-        if(state.value.busy || state.value.apps.none { it.packageName==pkg && it.supported })return
+        if(state.value.busy)return
+        val app=state.value.apps.find { it.packageName==pkg } ?: return
+        if(!app.supported) { report(app.reason);return }
         val selected=AppCatalog.toggle(state.value.selection,pkg);saved["selection"]=selected;mutable.update { it.copy(selection=selected) }
     }
     fun clearSelection() { saved["selection"]=emptyList<String>();mutable.update { it.copy(selection=emptyList()) } }

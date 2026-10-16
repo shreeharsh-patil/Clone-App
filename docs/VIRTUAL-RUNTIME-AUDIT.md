@@ -1,6 +1,8 @@
 # Runtime candidate review — 16 October 2026
 
-The five requested repositories were fetched and their runtime/build/native trees inspected locally in `.research/`. This is a source audit, not evidence of upstream runtime execution. No candidate code, AAR, hook archive or binary is incorporated in Clone Apps. Public compatibility claims are recorded as claims.
+The five requested repositories were fetched and their runtime/build/native trees inspected locally in `.research/`. The initial review below selected the cooperative probe fallback used by the default build and public 0.3 release. No imported engine is incorporated in that default build. Public compatibility claims are recorded as claims.
+
+**Subsequent experiment:** an opt-in, separately identified application now builds adapted TeguFy runtime source with source-built Dobby, xDL and FreeReflection. It excludes the upstream prebuilt hook archives and has executed two ordinary apps on an Android 15 x86_64 emulator. This addresses the prebuilt provenance issue identified below for that experimental path; it does not establish production or universal compatibility. See [source pins, adaptations, executed checks and remaining gates](GENERAL-RUNTIME-EXPERIMENT.md).
 
 | Candidate and inspected revision | Source and maintenance | Licensing / provenance gate | Technical gate / decision |
 | --- | --- | --- | --- |

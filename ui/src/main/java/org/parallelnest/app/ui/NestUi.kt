@@ -19,6 +19,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -79,6 +81,7 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable fun NestUi(vm: NestViewModel,actions: UiActions) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val generalRuntime=state.runtime?.type=="general_experimental"
     val nav=rememberNavController()
     val back by nav.currentBackStackEntryAsState()
     val route=back?.destination?.route ?: "home"
@@ -86,6 +89,7 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
     var searchVisible by rememberSaveable { mutableStateOf(false) }
     var rename by remember { mutableStateOf<CloneInfo?>(null) }
     var delete by remember { mutableStateOf<CloneInfo?>(null) }
+    var unavailable by remember { mutableStateOf<AppInfo?>(null) }
     var name by remember { mutableStateOf("") }
     val snackbar=remember { SnackbarHostState() }
     LaunchedEffect(state.message) { state.message?.let { snackbar.showSnackbar(it);vm.clearMessage() } }
@@ -114,33 +118,45 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
             NavHost(nav,startDestination="home") {
                 composable("home") {
                     LazyVerticalGrid(columns=GridCells.Fixed(3),contentPadding=PaddingValues(16.dp),horizontalArrangement=Arrangement.spacedBy(10.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-                        item(span={GridItemSpan(3)}) { Text("First-party Activity prototype · general apps unsupported",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
+                        item(span={GridItemSpan(3)}) { Text(if(generalRuntime)"Experimental runtime · app compatibility varies" else "Test prototype · only Clone Apps Probe can be cloned",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
                         items(state.instances,key={it.id}) { row -> CloneTile(row,state.busy,{actions.launch(row)},{rename(row)},{vm.accent(row,(row.accent+1)%5)},{info(row)},{vm.info(row)},{delete=row}) }
                         item(key="add-app") { AddTile(enabled=!state.busy,onClick=::add) }
                     }
                 }
                 composable("deviceapps") {
                     val apps=remember(state.apps,state.query){AppCatalog.filter(state.apps,state.query)}
-                    val hot=AppCatalog.hot(apps)
+                    val supported=apps.filter { it.supported }
+                    val unsupported=apps.filterNot { it.supported }
                     Column(Modifier.fillMaxSize()) {
                         if(searchVisible || state.query.isNotEmpty()) OutlinedTextField(state.query,vm::query,label={Text("Search apps")},singleLine=true,modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=8.dp),trailingIcon={if(state.query.isNotEmpty())TextButton(onClick={vm.query("")}){Text("Clear")}})
                         if(state.busy)LinearProgressIndicator(Modifier.fillMaxWidth())
-                        LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(0.dp)) {
-                            item { Text("Hot Apps",style=MaterialTheme.typography.titleMedium,modifier=Modifier.padding(bottom=12.dp)) }
-                            if(hot.isEmpty())item { Text("No matching popular apps installed.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall,modifier=Modifier.padding(bottom=12.dp)) }
-                            itemsIndexed(hot,key={_,a->"hot:${a.packageName}"}) { index,app -> DeviceAppRow(app,index,hot.size,state,vm) }
-                            item { Text("All Apps",style=MaterialTheme.typography.titleMedium,modifier=Modifier.padding(top=20.dp,bottom=12.dp)) }
-                            itemsIndexed(apps,key={_,a->"all:${a.packageName}"}) { index,app -> DeviceAppRow(app,index,apps.size,state,vm) }
-                            if(apps.isEmpty() && !state.busy)item { Text("No eligible installed apps match this search.",color=MaterialTheme.colorScheme.onSurfaceVariant) }
+                        LazyColumn(Modifier.weight(1f).testTag("installed-apps"),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(0.dp)) {
+                            item {
+                                val noneAvailable=state.discoveryComplete && state.apps.none { it.supported }
+                                Note(if(!state.discoveryComplete)"Checking installed apps" else if(noneAvailable)"No supported apps installed" else if(generalRuntime)"Experimental app cloning" else "Limited app support",
+                                    if(generalRuntime)"Select an app to attempt cloning. A clone is recorded after its guest Activity resumes. App features and device compatibility still need verification."
+                                    else "This version can clone only the Clone Apps Probe test app. Other installed apps cannot be cloned with this runtime. Tap an unavailable app for its compatibility details.") {
+                                    TextButton(onClick={nav.navigate("runtime")}){Text("View runtime support")}
+                                }
+                            }
+                            if(supported.isNotEmpty()) {
+                                item { Text(if(generalRuntime)"Available to try" else "Available to clone",style=MaterialTheme.typography.titleMedium,modifier=Modifier.padding(top=20.dp,bottom=12.dp)) }
+                                itemsIndexed(supported,key={_,a->"supported:${a.packageName}"}) { index,app -> DeviceAppRow(app,index,supported.size,state,vm){unavailable=it} }
+                            }
+                            if(unsupported.isNotEmpty()) {
+                                item { Text("Unavailable in this version",style=MaterialTheme.typography.titleMedium,modifier=Modifier.padding(top=20.dp,bottom=12.dp)) }
+                                itemsIndexed(unsupported,key={_,a->"unsupported:${a.packageName}"}) { index,app -> DeviceAppRow(app,index,unsupported.size,state,vm){unavailable=it} }
+                            }
+                            if(apps.isEmpty() && state.discoveryComplete && !state.busy)item { Text("No installed apps match this search.",color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(top=16.dp)) }
                         }
                         Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
-                            Text("Activity prototype · first-party probe only",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(if(generalRuntime)"Experimental · successful launch required" else "Activity prototype · first-party probe only",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                             GradientInstall(state.selection.size,enabled=state.selection.isNotEmpty() && !state.busy,onClick=::install)
                         }
                     }
                 }
                 composable("runtime") { Page("Guest runtime") {
-                    Note("Activity hosting prototype", state.runtime?.description ?: "Checking runtime…")
+                    Note(if(generalRuntime)"Experimental app runtime" else "Activity hosting prototype", state.runtime?.description ?: "Checking runtime…")
                     state.runtime?.capabilities?.forEach { (feature, status) -> Text("$feature: $status") }
                     Text("Guests share the host Android UID. Directory separation does not provide an Android security sandbox.")
                 } }
@@ -161,7 +177,7 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
                     if(row==null)Page("Clone unavailable"){Text("The guest registry entry is unavailable. Refresh Apps.")}
                     else Page(row.name) {
                         AppIcon(row.packageName,row.accent,if(row.engine=="work_profile")row.profile else null,72)
-                        Text("Clone ${row.number} · in-app Activity prototype",style=MaterialTheme.typography.titleMedium)
+                        Text("Clone ${row.number} · ${if(generalRuntime)"experimental app runtime" else "in-app Activity prototype"}",style=MaterialTheme.typography.titleMedium)
                         Text(row.packageName,color=MaterialTheme.colorScheme.onSurfaceVariant)
                         Text("Created ${DateFormat.getDateTimeInstance().format(Date(row.created))}\nLast successful launch: ${if(row.lastLaunch==0L) "Never" else DateFormat.getDateTimeInstance().format(Date(row.lastLaunch))}",style=MaterialTheme.typography.bodySmall)
                         Text("Virtual user ${row.virtualUser} · ${row.runtime} · ${row.compatibility}",color=MaterialTheme.colorScheme.onSurfaceVariant)
@@ -170,7 +186,8 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
                         DetailAction("Change Icon"){vm.accent(row,(row.accent+1)%5)}
                         DetailAction("App Info"){vm.info(row)}
                         DetailAction("Storage"){vm.info(row)}
-                        Text("Guest data is stored under this instance UUID. Guests share Clone Apps' Android UID.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(if(generalRuntime)"Guest data is stored under this instance's virtual user. APK code is shared between clones of the same version. Guests share Clone Apps' Android UID."
+                            else "Guest data is stored under this instance UUID. Guests share Clone Apps' Android UID.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
                         DetailAction("Update guest APK"){vm.update(row)}
                         DetailAction("Compatibility Check"){vm.diagnostics(row);nav.navigate("diagnostics")}
                         DetailAction("Delete Clone",true){delete=row}
@@ -204,9 +221,9 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
                     state.legacy.forEach { row -> OutlinedButton(onClick={vm.launchLegacy(row)},enabled=!state.busy,modifier=Modifier.fillMaxWidth()){Text("Open legacy ${row.name}")} }
                 } }
                 composable("diagnostics") { Page("Diagnostics") {
-                    Text("First-party Activity hosting supports files, preferences and SQLite. Hardware and background components have no guest bridges. Export diagnostics for runtime capabilities.",color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if(generalRuntime)state.runtime?.description.orEmpty() else "First-party Activity hosting supports files, preferences and SQLite. Hardware and background components have no guest bridges. Export diagnostics for runtime capabilities.",color=MaterialTheme.colorScheme.onSurfaceVariant)
                     state.instances.forEach { row -> OutlinedButton(onClick={vm.diagnostics(row)},enabled=!state.diagnosticBusy,modifier=Modifier.fillMaxWidth()){Text(row.name,maxLines=1,overflow=TextOverflow.Ellipsis)} }
-                    if(state.instances.isEmpty())Text("No guest instances. Install the matching-signed isolation probe and use Add App.")
+                    if(state.instances.isEmpty())Text(if(generalRuntime)"No guest instances. Use Add App to select an installed application." else "No guest instances. Install the matching-signed isolation probe and use Add App.")
                     if(state.diagnosticBusy)LinearProgressIndicator(Modifier.fillMaxWidth())
                     state.report?.let { report ->
                         Text("${report.packageName}\nProfile ${report.profile} · Android API ${report.api} · app target ${report.target}",style=MaterialTheme.typography.bodySmall)
@@ -219,43 +236,52 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
                 } }
                 composable("bluetooth") { BluetoothScreen(actions.bluetoothSettings,actions.bluetoothPermissions,actions.bluetoothShare) }
                 composable("privacy") { Page("Privacy Policy") {
-                    Note("Offline manager","No internet permission, account with us, analytics, ads or credential collection. Only the trusted first-party probe can run in this prototype.")
+                    Note(if(generalRuntime)"Experimental app runtime" else "Offline manager",if(generalRuntime)"The experimental runtime has internet permission for guest apps. Guest apps keep their own network and privacy behavior. Automatic runtime log uploading is disabled."
+                        else "No internet permission, account with us, analytics, ads or credential collection. Only the trusted first-party probe can run in this prototype.")
                     Note("Shared host UID","Guests run as the host Android UID. Guest hardware bridges are unsupported. The manager's Bluetooth features request normal Android permission consent for the selected operation.")
                     Note("Files and metadata","File sharing grants temporary access only to the file you select. Room stores clone metadata; DataStore stores preferences. Backups contain names, styles and timestamps, not protected app data or provisioning secrets.")
                 } }
                 composable("about") { Page("About Clone Apps") {
                     Text("${actions.version} · Apache License 2.0")
-                    Text("Original Kotlin, Jetpack Compose and Rust implementation. A limited first-party Activity hosting prototype with independent instance directories. No root, ads or subscriptions.")
-                    Text(VirtualContainerEngine.reason,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("Island, Shelter, BlackBox, NewBlackbox and VirtualApp were researched. Their code and artwork are not bundled.")
+                    Text(if(generalRuntime)"Kotlin, Jetpack Compose and Rust manager with an experimental source-built BlackBox runtime. App compatibility and physical-device coverage remain incomplete."
+                        else "Original Kotlin, Jetpack Compose and Rust implementation. A limited first-party Activity hosting prototype with independent instance directories. No root, ads or subscriptions.")
+                    Text(if(generalRuntime)state.runtime?.description.orEmpty() else VirtualContainerEngine.reason,color=MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(if(generalRuntime)"Includes adapted BlackBox, Dobby, FreeReflection and xDL source. Their licenses and source revisions are included with the experiment."
+                        else "Island, Shelter, BlackBox, NewBlackbox and VirtualApp were researched. Their code and artwork are not bundled.")
                     OutlinedButton(onClick={nav.navigate("notices")}){Text("Open-Source Licenses")}
                     TextButton(onClick=actions.repository){Text("GitHub Repository")}
                 } }
                 composable("notices") {
                     val context=LocalContext.current
-                    val parts by produceState<List<String>>(emptyList()) { value=withContext(Dispatchers.IO){context.assets.open("third-party-notices.txt").bufferedReader().use{it.readText()}.split("\n\n").flatMap{it.chunked(4096)}} }
+                    val parts by produceState<List<String>>(emptyList(),generalRuntime) { value=withContext(Dispatchers.IO){
+                        val base=context.assets.open("third-party-notices.txt").bufferedReader().use{it.readText()}
+                        val runtime=if(generalRuntime)context.assets.open("third-party-runtime-notices.txt").bufferedReader().use{it.readText()} else ""
+                        (base+"\n\n"+runtime).split("\n\n").flatMap{it.chunked(4096)}
+                    } }
                     LazyColumn(Modifier.fillMaxSize().padding(16.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) { items(parts){Text(it,style=MaterialTheme.typography.bodySmall)} }
                 }
             }
         }
     }
     rename?.let { row -> AlertDialog(onDismissRequest={rename=null},title={Text("Rename Clone")},text={OutlinedTextField(name,{name=it.take(80)},singleLine=true,label={Text("Display name")})},confirmButton={TextButton(onClick={vm.rename(row,name);rename=null},enabled=name.isNotBlank() && !state.busy){Text("Save")}},dismissButton={TextButton(onClick={rename=null}){Text("Cancel")}}) }
-    delete?.let { row -> AlertDialog(onDismissRequest={delete=null},title={Text("Delete ${row.name}?")},text={Text("This permanently deletes only this guest instance's files, preferences, databases and APK. Other instances and the original app are preserved.")},confirmButton={TextButton(onClick={vm.delete(row);delete=null},enabled=!state.busy){Text("Delete Clone")}},dismissButton={TextButton(onClick={delete=null}){Text("Cancel")}}) }
+    delete?.let { row -> AlertDialog(onDismissRequest={delete=null},title={Text("Delete ${row.name}?")},text={Text(if(generalRuntime)"This permanently deletes this clone's private data. Shared APK code is removed after its last clone is deleted. Other instances and the original app are preserved." else "This permanently deletes only this guest instance's files, preferences, databases and APK. Other instances and the original app are preserved.")},confirmButton={TextButton(onClick={vm.delete(row);delete=null},enabled=!state.busy){Text("Delete Clone")}},dismissButton={TextButton(onClick={delete=null}){Text("Cancel")}}) }
+    unavailable?.let { app -> AlertDialog(onDismissRequest={unavailable=null},title={Text("Cannot clone ${app.label}")},text={Text(app.reason)},confirmButton={TextButton(onClick={unavailable=null}){Text("OK")}}) }
 }
 
 @Composable private fun GradientInstall(count: Int,enabled: Boolean,onClick: ()->Unit) {
-    Surface(Modifier.fillMaxWidth().heightIn(min=52.dp).background(Brush.horizontalGradient(listOf(NestBlue,NestPurple)),RoundedCornerShape(14.dp)).clickable(enabled=enabled,onClick=onClick),shape=RoundedCornerShape(14.dp),color=Color.Transparent) {
+    Surface(Modifier.fillMaxWidth().heightIn(min=52.dp).alpha(if(enabled)1f else .38f).background(Brush.horizontalGradient(listOf(NestBlue,NestPurple)),RoundedCornerShape(14.dp)).clickable(enabled=enabled,onClick=onClick),shape=RoundedCornerShape(14.dp),color=Color.Transparent) {
         Box(Modifier.padding(14.dp),contentAlignment=Alignment.Center){Text("Clone ($count)",color=Color.White,fontWeight=FontWeight.SemiBold)}
     }
 }
-@Composable private fun DeviceAppRow(app: AppInfo,index: Int,total: Int,state: NestState,vm: NestViewModel) {
+@Composable private fun DeviceAppRow(app: AppInfo,index: Int,total: Int,state: NestState,vm: NestViewModel,onUnavailable: (AppInfo)->Unit) {
     val enabled=app.supported && !state.busy
     val shape=RoundedCornerShape(topStart=if(index==0)14.dp else 0.dp,topEnd=if(index==0)14.dp else 0.dp,bottomStart=if(index==total-1)14.dp else 0.dp,bottomEnd=if(index==total-1)14.dp else 0.dp)
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer,shape)) {
-        Row(Modifier.fillMaxWidth().clickable(enabled=enabled){vm.select(app.packageName)}.padding(horizontal=12.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth().clickable(enabled=!state.busy){if(app.supported)vm.select(app.packageName) else onUnavailable(app)}.padding(horizontal=12.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
             AppIcon(app.packageName)
             Column(Modifier.weight(1f)){Text(app.label,maxLines=1,overflow=TextOverflow.Ellipsis);Text(if(!app.supported)app.reason else app.packageName,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=2,overflow=TextOverflow.Ellipsis)}
-            Checkbox(app.packageName in state.selection,onCheckedChange={vm.select(app.packageName)},enabled=enabled)
+            if(app.supported)Checkbox(app.packageName in state.selection,onCheckedChange={vm.select(app.packageName)},enabled=enabled)
+            else Text("Details",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.primary)
         }
         if(index<total-1)HorizontalDivider(Modifier.padding(start=68.dp),color=MaterialTheme.colorScheme.outlineVariant)
     }

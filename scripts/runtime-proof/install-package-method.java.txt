@@ -1,0 +1,41 @@
+        long started = System.currentTimeMillis();
+        InstallResult result = new InstallResult();
+        result.success = false;
+        try {
+            if (!option.isFlag(InstallOption.FLAG_STORAGE) || option.isFlag(InstallOption.FLAG_URI_FILE)) {
+                return result.installError("This experiment requires a private APK file or APK set");
+            }
+            File source = new File(file);
+            PackageParser.Package parsed = parserApk(source.getAbsolutePath());
+            if (parsed == null) return result.installError("Android could not parse the complete APK set");
+            result.packageName = parsed.packageName;
+            if (parsed.packageName.equals(BlackBoxCore.getHostPkg())) return result.installError("The host cannot clone itself");
+            if (!com.tegufy.blackbox.core.system.pm.installer.CopyExecutor.supportsSource(source)) {
+                return result.installError("The APK set has no native libraries for this 64-bit process");
+            }
+            if (!com.tegufy.blackbox.core.system.pm.installer.CopyExecutor.matchesImported(source, parsed.packageName)) {
+                return result.installError("A different APK set already has clones; shared-code updates are not implemented");
+            }
+            if (!sUserManager.exists(userId)) sUserManager.createUser(userId);
+            if (isInstalled(parsed.packageName, userId)) return result.installError("This virtual user already contains the package");
+            BPackageSettings settings = mSettings.getPackageLPw(parsed.packageName, parsed, option);
+            if (BPackageInstallerService.get().installPackageAsUser(settings, userId) != 0) {
+                return result.installError("Could not copy the APK set into private storage");
+            }
+            synchronized (mPackages) {
+                settings.setInstalled(true, userId);
+                if (!settings.save()) throw new java.io.IOException("Could not persist package metadata");
+            }
+            mComponentResolver.removeAllComponents(settings.pkg);
+            mComponentResolver.addAllComponents(settings.pkg);
+            mSettings.scanPackage(parsed.packageName);
+            if (!isInstalled(parsed.packageName, userId)) return result.installError("Imported metadata could not be recovered");
+            onPackageInstalled(parsed.packageName, userId);
+            result.success = true;
+            return result;
+        } catch (Throwable error) {
+            android.util.Log.e(TAG, "Import failed", error);
+            return result.installError("Import failed: " + error.getClass().getSimpleName() + ": " + error.getMessage());
+        } finally {
+            Slog.d(TAG, "install finished in " + (System.currentTimeMillis() - started) + "ms");
+        }
