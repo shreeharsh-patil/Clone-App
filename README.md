@@ -19,6 +19,10 @@ Open **Clone Apps → Add App → Clone Apps Probe → Clone (1)**. The runtime 
 
 Only the first-party probe is compatible with the current runtime. It must carry the guest protocol marker and the same certificate as the host. Other installed launcher apps appear with their unsupported reason. Installing a probe with an unrelated signing certificate does not bypass the gate.
 
+If no apps can be selected, the test probe is either absent or incompatible with the host signing identity. Ordinary installed apps cannot be cloned by this runtime. The picker groups compatible and unavailable apps, shows a notice when nothing compatible is installed, and opens the full compatibility reason when an unavailable app is tapped. A brighter Clone button appears only after a compatible app is selected; refreshing discovery removes stale selections.
+
+For the published production-signed prototype, the optional `Clone-Apps-Test-Probe-v2.apk` fixture is distributed on the [v0.3.0 prerelease page](https://github.com/shreeharsh-patil/Clone-App/releases/tag/v0.3.0-prototype). Install it alongside the release host, then select **Clone Apps Probe**. This fixture demonstrates the supported test-app flow and does not add compatibility for ordinary apps. Its source is `isolation-probe`, built with `-PprobeVersionCode=2` and signed with the existing host certificate.
+
 Locally signed prototype artifacts are in `artifacts/virtual-runtime/` when the existing private signing material is available. `Clone-Apps-v0.3.0-prototype.apk` retains application ID `org.parallelnest.app` and the release signing identity. Install `isolation-probe-v1-signed.apk` with that release host. Debug and release certificates differ: do not uninstall an existing app or replace its signing identity to force an update.
 
 ## Implemented and tested scope

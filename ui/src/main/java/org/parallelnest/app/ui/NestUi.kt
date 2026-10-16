@@ -19,6 +19,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -86,6 +88,7 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
     var searchVisible by rememberSaveable { mutableStateOf(false) }
     var rename by remember { mutableStateOf<CloneInfo?>(null) }
     var delete by remember { mutableStateOf<CloneInfo?>(null) }
+    var unavailable by remember { mutableStateOf<AppInfo?>(null) }
     var name by remember { mutableStateOf("") }
     val snackbar=remember { SnackbarHostState() }
     LaunchedEffect(state.message) { state.message?.let { snackbar.showSnackbar(it);vm.clearMessage() } }
@@ -114,24 +117,35 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
             NavHost(nav,startDestination="home") {
                 composable("home") {
                     LazyVerticalGrid(columns=GridCells.Fixed(3),contentPadding=PaddingValues(16.dp),horizontalArrangement=Arrangement.spacedBy(10.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-                        item(span={GridItemSpan(3)}) { Text("First-party Activity prototype · general apps unsupported",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
+                        item(span={GridItemSpan(3)}) { Text("Test prototype · only Clone Apps Probe can be cloned",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
                         items(state.instances,key={it.id}) { row -> CloneTile(row,state.busy,{actions.launch(row)},{rename(row)},{vm.accent(row,(row.accent+1)%5)},{info(row)},{vm.info(row)},{delete=row}) }
                         item(key="add-app") { AddTile(enabled=!state.busy,onClick=::add) }
                     }
                 }
                 composable("deviceapps") {
                     val apps=remember(state.apps,state.query){AppCatalog.filter(state.apps,state.query)}
-                    val hot=AppCatalog.hot(apps)
+                    val supported=apps.filter { it.supported }
+                    val unsupported=apps.filterNot { it.supported }
                     Column(Modifier.fillMaxSize()) {
                         if(searchVisible || state.query.isNotEmpty()) OutlinedTextField(state.query,vm::query,label={Text("Search apps")},singleLine=true,modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=8.dp),trailingIcon={if(state.query.isNotEmpty())TextButton(onClick={vm.query("")}){Text("Clear")}})
                         if(state.busy)LinearProgressIndicator(Modifier.fillMaxWidth())
-                        LazyColumn(Modifier.weight(1f),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(0.dp)) {
-                            item { Text("Hot Apps",style=MaterialTheme.typography.titleMedium,modifier=Modifier.padding(bottom=12.dp)) }
-                            if(hot.isEmpty())item { Text("No matching popular apps installed.",color=MaterialTheme.colorScheme.onSurfaceVariant,style=MaterialTheme.typography.bodySmall,modifier=Modifier.padding(bottom=12.dp)) }
-                            itemsIndexed(hot,key={_,a->"hot:${a.packageName}"}) { index,app -> DeviceAppRow(app,index,hot.size,state,vm) }
-                            item { Text("All Apps",style=MaterialTheme.typography.titleMedium,modifier=Modifier.padding(top=20.dp,bottom=12.dp)) }
-                            itemsIndexed(apps,key={_,a->"all:${a.packageName}"}) { index,app -> DeviceAppRow(app,index,apps.size,state,vm) }
-                            if(apps.isEmpty() && !state.busy)item { Text("No eligible installed apps match this search.",color=MaterialTheme.colorScheme.onSurfaceVariant) }
+                        LazyColumn(Modifier.weight(1f).testTag("installed-apps"),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(0.dp)) {
+                            item {
+                                val noneAvailable=state.discoveryComplete && state.apps.none { it.supported }
+                                Note(if(!state.discoveryComplete)"Checking installed apps" else if(noneAvailable)"No supported apps installed" else "Limited app support",
+                                    "This version can clone only the Clone Apps Probe test app. Other installed apps cannot be cloned with this runtime. Tap an unavailable app for its compatibility details.") {
+                                    TextButton(onClick={nav.navigate("runtime")}){Text("View runtime support")}
+                                }
+                            }
+                            if(supported.isNotEmpty()) {
+                                item { Text("Available to clone",style=MaterialTheme.typography.titleMedium,modifier=Modifier.padding(top=20.dp,bottom=12.dp)) }
+                                itemsIndexed(supported,key={_,a->"supported:${a.packageName}"}) { index,app -> DeviceAppRow(app,index,supported.size,state,vm){unavailable=it} }
+                            }
+                            if(unsupported.isNotEmpty()) {
+                                item { Text("Unavailable in this version",style=MaterialTheme.typography.titleMedium,modifier=Modifier.padding(top=20.dp,bottom=12.dp)) }
+                                itemsIndexed(unsupported,key={_,a->"unsupported:${a.packageName}"}) { index,app -> DeviceAppRow(app,index,unsupported.size,state,vm){unavailable=it} }
+                            }
+                            if(apps.isEmpty() && state.discoveryComplete && !state.busy)item { Text("No installed apps match this search.",color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(top=16.dp)) }
                         }
                         Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background).padding(16.dp),verticalArrangement=Arrangement.spacedBy(8.dp)) {
                             Text("Activity prototype · first-party probe only",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
@@ -241,21 +255,23 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
     }
     rename?.let { row -> AlertDialog(onDismissRequest={rename=null},title={Text("Rename Clone")},text={OutlinedTextField(name,{name=it.take(80)},singleLine=true,label={Text("Display name")})},confirmButton={TextButton(onClick={vm.rename(row,name);rename=null},enabled=name.isNotBlank() && !state.busy){Text("Save")}},dismissButton={TextButton(onClick={rename=null}){Text("Cancel")}}) }
     delete?.let { row -> AlertDialog(onDismissRequest={delete=null},title={Text("Delete ${row.name}?")},text={Text("This permanently deletes only this guest instance's files, preferences, databases and APK. Other instances and the original app are preserved.")},confirmButton={TextButton(onClick={vm.delete(row);delete=null},enabled=!state.busy){Text("Delete Clone")}},dismissButton={TextButton(onClick={delete=null}){Text("Cancel")}}) }
+    unavailable?.let { app -> AlertDialog(onDismissRequest={unavailable=null},title={Text("Cannot clone ${app.label}")},text={Text(app.reason)},confirmButton={TextButton(onClick={unavailable=null}){Text("OK")}}) }
 }
 
 @Composable private fun GradientInstall(count: Int,enabled: Boolean,onClick: ()->Unit) {
-    Surface(Modifier.fillMaxWidth().heightIn(min=52.dp).background(Brush.horizontalGradient(listOf(NestBlue,NestPurple)),RoundedCornerShape(14.dp)).clickable(enabled=enabled,onClick=onClick),shape=RoundedCornerShape(14.dp),color=Color.Transparent) {
+    Surface(Modifier.fillMaxWidth().heightIn(min=52.dp).alpha(if(enabled)1f else .38f).background(Brush.horizontalGradient(listOf(NestBlue,NestPurple)),RoundedCornerShape(14.dp)).clickable(enabled=enabled,onClick=onClick),shape=RoundedCornerShape(14.dp),color=Color.Transparent) {
         Box(Modifier.padding(14.dp),contentAlignment=Alignment.Center){Text("Clone ($count)",color=Color.White,fontWeight=FontWeight.SemiBold)}
     }
 }
-@Composable private fun DeviceAppRow(app: AppInfo,index: Int,total: Int,state: NestState,vm: NestViewModel) {
+@Composable private fun DeviceAppRow(app: AppInfo,index: Int,total: Int,state: NestState,vm: NestViewModel,onUnavailable: (AppInfo)->Unit) {
     val enabled=app.supported && !state.busy
     val shape=RoundedCornerShape(topStart=if(index==0)14.dp else 0.dp,topEnd=if(index==0)14.dp else 0.dp,bottomStart=if(index==total-1)14.dp else 0.dp,bottomEnd=if(index==total-1)14.dp else 0.dp)
     Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceContainer,shape)) {
-        Row(Modifier.fillMaxWidth().clickable(enabled=enabled){vm.select(app.packageName)}.padding(horizontal=12.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
+        Row(Modifier.fillMaxWidth().clickable(enabled=!state.busy){if(app.supported)vm.select(app.packageName) else onUnavailable(app)}.padding(horizontal=12.dp,vertical=12.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(12.dp)) {
             AppIcon(app.packageName)
             Column(Modifier.weight(1f)){Text(app.label,maxLines=1,overflow=TextOverflow.Ellipsis);Text(if(!app.supported)app.reason else app.packageName,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=2,overflow=TextOverflow.Ellipsis)}
-            Checkbox(app.packageName in state.selection,onCheckedChange={vm.select(app.packageName)},enabled=enabled)
+            if(app.supported)Checkbox(app.packageName in state.selection,onCheckedChange={vm.select(app.packageName)},enabled=enabled)
+            else Text("Details",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.primary)
         }
         if(index<total-1)HorizontalDivider(Modifier.padding(start=68.dp),color=MaterialTheme.colorScheme.outlineVariant)
     }
