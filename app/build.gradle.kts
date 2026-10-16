@@ -3,7 +3,11 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
-dependencyLocking { lockAllConfigurations() }
+val generalRuntime = providers.gradleProperty("generalRuntime").orNull == "true"
+dependencyLocking {
+    lockAllConfigurations()
+    if (generalRuntime) lockFile = file("gradle-general-runtime.lockfile")
+}
 android {
     namespace = "org.parallelnest.app"
     compileSdk = 36
@@ -14,8 +18,16 @@ android {
         targetSdk = 36
         versionCode = 5
         versionName = "0.3.1-prototype"
+        manifestPlaceholders["applicationLabel"] = if (generalRuntime) "Clone Apps Experimental" else "@string/app_name"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
+    }
+    sourceSets.getByName("main").java.srcDir(if (generalRuntime) "src/generalRuntime/java" else "src/probeRuntime/java")
+    if (generalRuntime) {
+        // Install alongside production; never change its signing or guest data.
+        defaultConfig.applicationId = "org.parallelnest.app.experimental"
+        defaultConfig.versionCode = 6
+        defaultConfig.versionName = "0.4.0-experimental"
     }
     signingConfigs {
         create("production") {
@@ -30,6 +42,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (generalRuntime) proguardFiles("general-runtime-proguard.pro")
             if (System.getenv("SIGNING_STORE_FILE") != null) signingConfig = signingConfigs.getByName("production")
         }
     }
@@ -41,6 +54,10 @@ android {
     lint { abortOnError = true }
 }
 dependencies {
+    if (generalRuntime) {
+        implementation(project(":runtime"))
+        implementation(project(":free-reflection"))
+    }
     implementation(project(":ui"))
     implementation(platform("androidx.compose:compose-bom:2026.03.00"))
     implementation("androidx.activity:activity-compose:1.11.0")

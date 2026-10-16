@@ -7,6 +7,7 @@ enum class CreationStage(val description: String) {
     CHECKING("Checking compatibility"), PREPARING("Preparing guest storage"), ANDROID("Loading application"), REGISTERED("Instance registered"), VERIFYING("Verifying guest Activity execution")
 }
 interface CloneEngine {
+    val changes: kotlinx.coroutines.flow.Flow<Unit> get() = kotlinx.coroutines.flow.emptyFlow()
     fun status(): EngineState
     suspend fun listSupportedApps(): List<AppInfo>
     suspend fun createInstance(app: AppInfo, name: String, progress: (CreationStage) -> Unit = {}): OperationResult

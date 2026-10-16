@@ -1,0 +1,18 @@
+{
+  "blackbox-android": {
+    "url": "https://github.com/TeguFy/blackbox-android.git",
+    "revision": "bf1623b7d45157bbc87be46a29352dd6bbbde9fa"
+  },
+  "Dobby-source": {
+    "url": "https://github.com/jmpews/Dobby.git",
+    "revision": "5dfc8546954ce3b3198132ab13fddb89ee92cdd7"
+  },
+  "FreeReflection-source": {
+    "url": "https://github.com/tiann/FreeReflection.git",
+    "revision": "550e36e464539fe59fcc6e49c8f54bfbf376dbfe"
+  },
+  "xDL-source": {
+    "url": "https://github.com/hexhacking/xDL.git",
+    "revision": "1e0b6254165a2ddcbd32f77a371700c69155acf8"
+  }
+}

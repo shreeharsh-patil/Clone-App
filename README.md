@@ -25,6 +25,16 @@ For the published production-signed prototype, the optional `Clone-Apps-Test-Pro
 
 Locally signed prototype artifacts are in `artifacts/virtual-runtime/` when the existing private signing material is available. `Clone-Apps-v0.3.0-prototype.apk` retains application ID `org.parallelnest.app` and the release signing identity. Install `isolation-probe-v1-signed.apk` with that release host. Debug and release certificates differ: do not uninstall an existing app or replace its signing identity to force an update.
 
+## Experimental general app runtime
+
+The opt-in `-PgeneralRuntime=true` build imports complete installed APK sets and
+runs ordinary guests with a source-built runtime. It uses a separate application
+ID and leaves the published probe prototype in place. Calculator, Notes and a
+controlled split APK fixture have run on an Android 15 x86_64 emulator; physical
+ARM64 and broader compatibility checks remain pending. See
+[build instructions, evidence and limits](docs/GENERAL-RUNTIME-EXPERIMENT.md).
+This is not a claim that every Android app can be cloned.
+
 ## Implemented and tested scope
 
 - Actual copied APK Activity instantiation and lifecycle under two lazy subprocess slots.

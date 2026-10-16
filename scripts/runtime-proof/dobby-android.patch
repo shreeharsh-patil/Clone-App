@@ -1,0 +1,164 @@
+diff --git a/builtin-plugin/SymbolResolver/elf/dobby_symbol_resolver.cc b/builtin-plugin/SymbolResolver/elf/dobby_symbol_resolver.cc
+index 2378433..51b120c 100644
+--- a/builtin-plugin/SymbolResolver/elf/dobby_symbol_resolver.cc
++++ b/builtin-plugin/SymbolResolver/elf/dobby_symbol_resolver.cc
+@@ -170,7 +170,7 @@ void *resolve_elf_internal_symbol(const char *library_name, const char *symbol_n
+   if (library_name) {
+     RuntimeModule module = ProcessRuntime::getModule(library_name);
+ 
+-    if (module.load_address) {
++    if (module.base) {
+       auto mmapFileMng = MmapFileManager(module.path);
+       auto file_mem = mmapFileMng.map();
+ 
+@@ -182,7 +182,7 @@ void *resolve_elf_internal_symbol(const char *library_name, const char *symbol_n
+       }
+ 
+       if (result)
+-        result = (void *)((addr_t)result + (addr_t)module.load_address - ((addr_t)file_mem - (addr_t)ctx.load_bias));
++        result = (void *)((addr_t)result + (addr_t)module.base - ((addr_t)file_mem - (addr_t)ctx.load_bias));
+     }
+   }
+ 
+@@ -190,7 +190,7 @@ void *resolve_elf_internal_symbol(const char *library_name, const char *symbol_n
+     auto ProcessModuleMap = ProcessRuntime::getModuleMap();
+     for (auto module : ProcessModuleMap) {
+ 
+-      if (module.load_address) {
++      if (module.base) {
+         auto mmapFileMng = MmapFileManager(module.path);
+         auto file_mem = mmapFileMng.map();
+ 
+@@ -202,7 +202,7 @@ void *resolve_elf_internal_symbol(const char *library_name, const char *symbol_n
+         }
+ 
+         if (result)
+-          result = (void *)((addr_t)result + (addr_t)module.load_address - ((addr_t)file_mem - (addr_t)ctx.load_bias));
++          result = (void *)((addr_t)result + (addr_t)module.base - ((addr_t)file_mem - (addr_t)ctx.load_bias));
+       }
+ 
+       if (result)
+diff --git a/cmake/compiler_and_linker.cmake b/cmake/compiler_and_linker.cmake
+index 4dc29bd..ed621bd 100644
+--- a/cmake/compiler_and_linker.cmake
++++ b/cmake/compiler_and_linker.cmake
+@@ -41,7 +41,7 @@ endif ()
+ 
+ if (PROCESSOR.ARM)
+   set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -arch armv7 -x assembler-with-cpp")
+-elseif (PROCESSOR.AARCH64)
++else ()
+   set(CMAKE_ASM_FLAGS "${CMAKE_ASM_FLAGS} -x assembler-with-cpp")
+ endif ()
+ 
+diff --git a/common/os_arch_features.h b/common/os_arch_features.h
+index ee0586d..25e8280 100644
+--- a/common/os_arch_features.h
++++ b/common/os_arch_features.h
+@@ -2,6 +2,10 @@
+ 
+ #include <sys/types.h>
+ #include <stddef.h>
++#if defined(ANDROID)
++#include <unistd.h>
++#include <sys/mman.h>
++#endif
+ #include "pac_kit.h"
+ 
+ #include "PlatformUnifiedInterface/platform.h"
+@@ -36,10 +40,10 @@ template <typename T> inline T arm64e_pac_strip_and_sign(T &addr) {
+ namespace android {
+ inline void make_memory_readable(void *address, size_t size) {
+ #if defined(ANDROID)
+-  auto page = (void *)ALIGN_FLOOR(address, OSMemory::PageSize());
+-  if (!OSMemory::SetPermission(page, OSMemory::PageSize(), kReadExecute)) {
+-    return;
+-  }
++  const auto page_size = static_cast<uintptr_t>(sysconf(_SC_PAGESIZE));
++  const auto first = reinterpret_cast<uintptr_t>(address) & ~(page_size - 1);
++  const auto end = (reinterpret_cast<uintptr_t>(address) + size + page_size - 1) & ~(page_size - 1);
++  if (end > first) mprotect(reinterpret_cast<void *>(first), end - first, PROT_READ | PROT_EXEC);
+ #endif
+ }
+ } // namespace android
+diff --git a/source/Backend/UserMode/ExecMemory/code-patch-tool-posix.cc b/source/Backend/UserMode/ExecMemory/code-patch-tool-posix.cc
+index bfe7361..26f4257 100644
+--- a/source/Backend/UserMode/ExecMemory/code-patch-tool-posix.cc
++++ b/source/Backend/UserMode/ExecMemory/code-patch-tool-posix.cc
+@@ -1,6 +1,6 @@
+ 
+ #include "dobby/dobby_internal.h"
+-#include "core/arch/Cpu.h"
++#include "PlatformUnifiedInterface/ExecMemory/ClearCacheTool.h"
+ 
+ #include <unistd.h>
+ #include <sys/mman.h>
+@@ -34,4 +34,4 @@ PUBLIC int DobbyCodePatch(void *address, uint8_t *buffer, uint32_t buffer_size)
+   return 0;
+ }
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/source/Backend/UserMode/PlatformUtil/Linux/ProcessRuntime.cc b/source/Backend/UserMode/PlatformUtil/Linux/ProcessRuntime.cc
+index 776d25e..1918865 100644
+--- a/source/Backend/UserMode/PlatformUtil/Linux/ProcessRuntime.cc
++++ b/source/Backend/UserMode/PlatformUtil/Linux/ProcessRuntime.cc
+@@ -14,7 +14,7 @@
+ #define LINE_MAX 2048
+ 
+ static bool memory_region_comparator(MemRange a, MemRange b) {
+-  return (a.start < b.start);
++  return (a.start() < b.start());
+ }
+ 
+ stl::vector<MemRegion> regions;
+@@ -163,7 +163,7 @@ static stl::vector<RuntimeModule> &get_process_map_with_proc_maps() {
+       path_buffer[strlen(path_buffer) - 1] = 0;
+     }
+     strncpy(module.path, path_buffer, sizeof(module.path) - 1);
+-    module.load_address = (void *)region_start;
++    module.base = (void *)region_start;
+     modules->push_back(module);
+ 
+ #if 0
+@@ -191,11 +191,11 @@ static stl::vector<RuntimeModule> get_process_map_with_linker_iterator() {
+         if (info->dlpi_name && info->dlpi_name[0] == '/')
+           strcpy(module.path, info->dlpi_name);
+ 
+-        module.load_address = (void *)info->dlpi_addr;
++        module.base = (void *)info->dlpi_addr;
+         for (size_t i = 0; i < info->dlpi_phnum; ++i) {
+           if (info->dlpi_phdr[i].p_type == PT_LOAD) {
+             uintptr_t load_bias = (info->dlpi_phdr[i].p_vaddr - info->dlpi_phdr[i].p_offset);
+-            module.load_address = (void *)((addr_t)module.load_address + load_bias);
++            module.base = (void *)((addr_t)module.base + load_bias);
+             break;
+           }
+         }
+diff --git a/source/TrampolineBridge/ClosureTrampolineBridge/arm64/closure_bridge_arm64.asm b/source/TrampolineBridge/ClosureTrampolineBridge/arm64/closure_bridge_arm64.asm
+index 7349181..f66e9a8 100644
+--- a/source/TrampolineBridge/ClosureTrampolineBridge/arm64/closure_bridge_arm64.asm
++++ b/source/TrampolineBridge/ClosureTrampolineBridge/arm64/closure_bridge_arm64.asm
+@@ -50,8 +50,14 @@ str TMP_REG_0, [sp, #(1 * 8)]
+ // call convention: x0 = register context, x1 = interceptor entry
+ mov x0, sp
+ ldr x1, [sp, #(2 * 8 + 2 * 8 + 30 * 8 + 8 * 16)]
++#if defined(__APPLE__)
+ adrp TMP_REG_0, cdecl(common_closure_bridge_handler)@PAGE
+ add TMP_REG_0, TMP_REG_0, cdecl(common_closure_bridge_handler)@PAGEOFF
++#else
++// Local Android build adaptation: use ELF GOT relocations instead of Mach-O PAGE relocations.
++adrp TMP_REG_0, :got:cdecl(common_closure_bridge_handler)
++ldr TMP_REG_0, [TMP_REG_0, :got_lo12:cdecl(common_closure_bridge_handler)]
++#endif
+ blr TMP_REG_0
+ 
+ // restore stack, saved original sp
+@@ -95,4 +101,4 @@ cdecl(closure_bridge_asm_end):
+ .align 8
+ common_closure_bridge_handler_addr:
+ .quad cdecl(common_closure_bridge_handler)
+-#endif
+\ No newline at end of file
++#endif

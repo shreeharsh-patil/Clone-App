@@ -1,0 +1,63 @@
+{
+  "date": "2026-10-16",
+  "application_id": "org.parallelnest.app.experimental",
+  "version_name": "0.4.0-experimental",
+  "version_code": 6,
+  "candidate_sha256": "48bbcf2cb792e61b68a814d0be6331cc2e91914541401af5dd2999290a35b381",
+  "candidate_certificate_sha256": "e041ea9a514979e5c956a2178dc4f8b8a407ed10cc79beecc5db8c86c1723d05",
+  "executed_minified_test_apk_sha256": "9a665090dbe108c17806bb70aaa107deaf329b3e1b0b930831f71d2489ea97a4",
+  "signing_difference": "Minified emulator test APK uses the existing debug certificate. All non-META-INF ZIP entries match the production-signed candidate exactly. Candidate signature verified; candidate not yet executed on ARM64.",
+  "device": {
+    "serial": "emulator-5564",
+    "api": "35",
+    "abi": "x86_64",
+    "fingerprint": "google/sdk_gphone64_x86_64/emu64xa:15/AE3A.240806.043/12960925:userdebug/dev-keys",
+    "shell_identity": "uid=2000(shell) gid=2000(shell) groups=2000(shell),1004(input),1007(log),1011(adb),1015(sdcard_rw),1028(sdcard_r),1078(ext_data_rw),1079(ext_obb_rw),3001(net_bt_admin),3002(net_bt),3003(inet),3006(net_bw_stats),3009(readproc),3011(uhid),3012(readtracefs) context=u:r:shell:s0",
+    "physical": false
+  },
+  "checks": {
+    "ordinary_apps": "Fossify Calculator 1.4.0: 42+7=49, separate second clone. Fossify Notes 1.7.0: two distinct saved note values.",
+    "split_apk": "Base plus separate install-time feature imported. Feature-only Activity, Java code and resource executed. Two clones had independent counters 1 and 2.",
+    "selective_delete": "Second split clone deleted; its virtual user directory absent. Other five registry identities, recorded guest databases, shared APK hashes and counter 1 preserved. Original split app still launches with counter 0.",
+    "minified": "Existing split clone counter 1 restored; fresh split clone started at 0; Notes clone 1 saved text restored.",
+    "cold_start": "Minified host after am force-stop: COLD, TotalTime 918 ms, WaitTime 931 ms; Notes guest reopened.",
+    "reboot": "Earlier debug revision retained clone data through reboot. A synchronous startup timeout prompted the async startup fix. Final revision has cold-process verification, not a fresh post-reboot run.",
+    "rust_registry": "21 passed, 0 failed",
+    "build": "Experimental debug + minified release passed. Default probe debug build passed.",
+    "alignment": "All 8 packaged ARM64/x86_64 native libraries passed ELF PT_LOAD and APK ZIP 16 KiB alignment checks."
+  },
+  "local_evidence": [
+    "artifacts/general-runtime/integrated-two-sentinels/evidence.json",
+    "artifacts/general-runtime/integrated-after-host-update/evidence.json",
+    "artifacts/general-runtime/integrated-after-reboot/evidence.json",
+    "artifacts/general-runtime/integrated-before-selective-delete/evidence.json",
+    "artifacts/general-runtime/integrated-after-selective-delete/evidence.json",
+    "artifacts/general-runtime/candidate/minified-fresh-split-clone.png",
+    "artifacts/general-runtime/candidate/minified-notes-recovered.xml"
+  ],
+  "runtime_sources": {
+    "upstreams": {
+      "BlackBox": "bf1623b7d45157bbc87be46a29352dd6bbbde9fa",
+      "Dobby": "5dfc8546954ce3b3198132ab13fddb89ee92cdd7",
+      "xDL": "1e0b6254165a2ddcbd32f77a371700c69155acf8",
+      "FreeReflection": "550e36e464539fe59fcc6e49c8f54bfbf376dbfe"
+    },
+    "generator_sha256": "0bc6b76f50848c4e2623c765bf2bb803ea8b7169f0bb81b09594d1d31ca24eac",
+    "adaptations": {
+      "capture_fixture_evidence.py": "82548466b770a8949f98ce733a3b05bc438b00512d2654100254103a8ac25626",
+      "CopyExecutor.java": "14f1aea2a29707ac5ab9c0b065d465d7ebe664ec651111303b2cf279ad0598aa",
+      "dobby-android.patch": "44fc67b0a42c93c85648e8df7af24bf19856ecc15ca83687ee7bac043733844e",
+      "install-package-method.java.txt": "b1d2f8f323134d6c1d79bfdb959d3b7c7bed5695950ff7215221b2c9476d20b1",
+      "LLVM-LICENSE.txt": "8d85c1057d742e597985c7d4e6320b015a9139385cff4cbae06ffc0ebe89afee",
+      "prepare_sources.py": "749b2214e3b0bfff1e1cd83a6a794a8aad4311388f7a0aac5e8bd96733bd48bd",
+      "sources.json": "71c96e365127424a973e5e23445a3a1dd9610c241005975565405aa8d69ec686"
+    }
+  },
+  "pending": [
+    "Physical unrooted ARM64 Android 15",
+    "General runtime on API 33, 34 and 36",
+    "Fresh reboot of final revision",
+    "Broader components, hardware, native path interception and account integration",
+    "No universal app compatibility claim"
+  ]
+}

@@ -34,6 +34,11 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
     private val mutable=MutableStateFlow(NestState(selection=saved["selection"] ?: emptyList(),query=saved["query"] ?: ""))
     val state=mutable.asStateFlow()
     init {
+        viewModelScope.launch { engine.changes.collect {
+            refresh()
+            while(state.value.busy)delay(100)
+            if(state.value.discoveryComplete)discover()
+        } }
         viewModelScope.launch { registry.settings.catch { report("Unable to read preferences: ${it.message}") }.collect { p -> mutable.update { it.copy(theme=p[stringPreferencesKey("theme")] ?: "dark") } } }
         viewModelScope.launch { registry.instances.catch { report("Unable to read metadata: ${it.message}") }.collect { refresh() } }
         viewModelScope.launch(Dispatchers.IO) { try { if(registry.pendingCreations().isNotEmpty()) report("An installation was interrupted. Refresh Apps to recover any completed work copies.") } catch(e:CancellationException){throw e}catch(e:Exception){report(e.message ?: "Metadata recovery failed")} }

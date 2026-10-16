@@ -84,8 +84,10 @@ pub fn canonicalize(input: &str) -> Result<String, String> {
                 if !packages.insert((&row.package, row.profile)) { return Err("Duplicate work-profile copy".into()); }
             }
             "virtual" => {
-                if !(0..=1_000_000_000).contains(&row.virtual_user) || row.profile != row.virtual_user || row.compatibility != "probe_only"
-                    || !["ready", "stopped", "failed", "missing"].contains(&row.runtime.as_str()) || row.abi != "bytecode" {
+                let supported_runtime = (row.compatibility == "probe_only" && row.abi == "bytecode")
+                    || (row.compatibility == "general_experimental" && ["arm64-v8a", "x86_64"].contains(&row.abi.as_str()));
+                if !(0..=1_000_000_000).contains(&row.virtual_user) || row.profile != row.virtual_user || !supported_runtime
+                    || !["ready", "stopped", "failed", "missing"].contains(&row.runtime.as_str()) {
                     return Err("Invalid virtual metadata".into());
                 }
                 if !virtual_users.insert(row.virtual_user) || !numbers.insert((&row.package, row.number)) { return Err("Duplicate virtual user or clone number".into()); }
@@ -135,6 +137,14 @@ mod tests {
         r.profile = user; r.virtual_user = user; r.number = number; r.runtime = "ready".into(); r.compatibility = "probe_only".into(); r.abi = "bytecode".into(); r
     }
     #[test] fn multiple_virtual_copies_allowed() { assert!(canonicalize(&json(vec![virtual_row(0,1),virtual_row(1,2), row()])).is_ok()); }
+    #[test] fn general_runtime_metadata_allowed() {
+        let mut r=virtual_row(12,1); r.compatibility="general_experimental".into(); r.abi="arm64-v8a".into();
+        assert!(canonicalize(&json(vec![r])).is_ok());
+    }
+    #[test] fn general_runtime_requires_supported_abi() {
+        let mut r=virtual_row(12,1); r.compatibility="general_experimental".into();
+        assert!(canonicalize(&json(vec![r])).is_err());
+    }
     #[test] fn duplicate_virtual_user_rejected() { let mut r=virtual_row(0,2); r.id=row().id; assert!(canonicalize(&json(vec![virtual_row(0,1),r])).is_err()); }
     #[test] fn duplicate_clone_number_rejected() { assert!(canonicalize(&json(vec![virtual_row(0,1),virtual_row(1,1)])).is_err()); }
     #[test] fn invalid_virtual_identity_rejected() { let mut r=virtual_row(0,1); r.virtual_user=-1; assert!(canonicalize(&json(vec![r])).is_err()); }
