@@ -26,8 +26,8 @@ android {
     if (generalRuntime) {
         // Install alongside production; never change its signing or guest data.
         defaultConfig.applicationId = "org.parallelnest.app.experimental"
-        defaultConfig.versionCode = 6
-        defaultConfig.versionName = "0.4.0-experimental"
+        defaultConfig.versionCode = 7
+        defaultConfig.versionName = "0.4.1-experimental"
     }
     signingConfigs {
         create("production") {
