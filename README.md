@@ -1,150 +1,77 @@
-# Clone Apps
+# Clone Apps — in-app Activity prototype
 
-An original, free Android work-profile app manager written in Kotlin, Jetpack Compose and Rust. No ads, no analytics, no account with us, and no root requirement. Android provides a separate profile sandbox for a second installed copy of an application.
+Clone Apps is an Android 13–16 Kotlin/Compose application with a Rust metadata validator. This feature branch implements a limited, original guest Activity runtime. It executes the first-party isolation probe APK inside host subprocesses with separate persistent data per instance.
 
-[Transparent artistic logo and design prompt](docs/branding/README.md). The application ID remains `org.parallelnest.app` so the rename preserves existing installations.
+**This is not a complete third-party app cloning engine.** General APKs, native/split guests, Services, Providers and hardware bridges remain unsupported. The app shows that limitation and rejects unsupported apps before registration. The five requested engines were reviewed; none passed both provenance and technical gates. See the [candidate audit](docs/VIRTUAL-RUNTIME-AUDIT.md).
 
-**Alpha software. One additional copy per package.** Virtual containers are disabled because none of the investigated engines passed the licensing, security and Android compatibility gates. See [feasibility/source review](docs/FEASIBILITY.md) and [executed test results](docs/TEST-RESULTS.md). A successful build alone is not a stable-release certification.
+New clones require no work profile, root or second Android user. The original app is never used as a substitute for a virtual launch. Each guest shares the host Android UID; directory separation is not OS sandbox isolation.
 
-## Download and install
+## Try the prototype
 
-APKs and complete corresponding source are published to [GitHub Releases](https://github.com/shreeharsh-patil/Clone-App/releases). For local builds, install `app/build/outputs/apk/debug/app-debug.apk` with Android's installer or `adb install -r`. The debug APK supports ARM64 phones and x86_64 emulators. The separate `isolation-probe/build/outputs/apk/debug/isolation-probe-debug.apk` is a first-party test app; it is not bundled in the manager.
+Install the host and the separate first-party probe with matching signing identities. For debug builds:
 
-Allow installation from your chosen file browser when Android asks. Open Clone Apps, select **Add App**, choose installed apps, and tap **Install (N)**. When no managed profile is connected, read the explanation, check consent and accept Android's profile setup screen before continuing installation. Work app accounts begin empty. To verify separation, save different values in the original and work copies of Clone Apps Probe.
-
-An existing work profile is never replaced. If another controller owns your profile, keep using it or make a deliberate choice in Android settings; removing a profile permanently deletes all of its app data. Clone Apps does not implement a profile-wipe button. Pause/resume a work profile in Android settings or Quick Settings.
-
-The v0.2.0-alpha release APK is signed with a persistent private release key. See [release signing and update identity](docs/SIGNING.md). This certificate differs from the earlier debug alpha, so it cannot update that installation; existing debug users can use the separately provided debug APK. Debug builds permit work-profile ADB debugging when system USB debugging is enabled, for isolation tests; release builds retain Android's default profile debugging restriction. APK updates require the same signing certificate. Do not replace the signing identity of an installed profile controller.
-
-## What is implemented
-
-- System-managed provisioning, permission explanations and explicit consent.
-- Installed launcher-app discovery using scoped package-visibility queries.
-- Base/split APK installation into the managed profile, authenticated cross-profile launching, profile-app synchronization, suspend/resume and work-only uninstallation.
-- Compact three-column dashboard, ordinary Add App tile, original app icons where Android exposes them, numbered badges and long-press actions.
-- Searchable installed-app selection, multi-select Install count, real sequential progress and cancellation of remaining queue entries.
-- Rename, icon framing, Android work-app information/storage controls, deletion confirmation, launcher shortcuts, timestamps and profile status.
-- Dark/system themes with blue and violet accents, edge-to-edge insets and native Compose navigation.
-- Room instance metadata and durable pending creation records, DataStore preferences and Android Keystore encryption for the authenticated profile bridge.
-- Manager-only metadata/settings backup and restore through Android's file picker, privacy screen, compatibility diagnostics, diagnostic export and complete dependency license viewer.
-- Native Rust schema/identifier/package validation, bounded import, strict serialization and duplicate-environment rejection, with tests and two JNI ABIs.
-
-Suspending an application uses Android's package suspension policy; it is not an unrestricted force-stop facility. Android may refuse suspension of critical packages. Launching through Clone Apps resumes a suspended work app.
-
-## Architecture
-
-```mermaid
-flowchart TD
-    UI[Native Compose screens] --> VM[Lifecycle ViewModel and StateFlow]
-    VM --> E[CloneEngine interface]
-    VM --> R[Transactional Room registry]
-    VM --> S[DataStore preferences]
-    R --> JNI[Rust JNI metadata validation]
-    E --> W[WorkProfileEngine]
-    W --> P[Android consent and provisioning]
-    W --> B[Authenticated cross-profile activity bridge]
-    B --> D[Profile-owner DevicePolicyManager]
-    B --> I[Profile-local PackageInstaller]
-    B --> A[Independent work app UID and storage]
-    E -. unavailable .-> V[VirtualContainer capability gate]
+```sh
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r isolation-probe/build/outputs/apk/debug/isolation-probe-debug.apk
 ```
 
-The personal-profile registry is the single source of truth for manager metadata. Actual displayed installations are reconciled with profile-specific LauncherApps records; removed apps/profiles are not presented as runnable copies. Registry entries survive app updates; profile serial IDs prevent mapping old entries onto a new profile. Stale metadata can remain for recovery without showing a nonexistent installation. Each package/profile pair appears once.
+Open **Clone Apps → Add App → Clone Apps Probe → Clone (1)**. The runtime copies and verifies the unchanged probe APK, loads its actual Activity and registers only after successful guest startup. Return to the dashboard and repeat to create another numbered instance. Save different values in each guest; preferences, files and SQLite belong to their UUID directories. Tap a dashboard icon to launch that instance. Long press for rename, icon style and deletion; instance details include stop, update and shortcuts.
 
-Gradle modules are `app`, `core`, `clone-engine`, `ui` and the separate first-party `isolation-probe`; `rust-core` contains the JNI library. `core` owns models, Room persistence, preferences and bridge encryption. `clone-engine` owns provisioning, installation and launching; `ui` owns Compose screens and the ViewModel. Legacy metadata migrates into Room while preserving instance IDs and custom names. Rust validates metadata rather than duplicating Android lifecycle APIs. Native calls, discovery, serialization and APK streaming run off the UI thread. The manager has no persistent background service or polling loop.
+Only the first-party probe is compatible with the current runtime. It must carry the guest protocol marker and the same certificate as the host. Other installed launcher apps appear with their unsupported reason. Installing a probe with an unrelated signing certificate does not bypass the gate.
 
-## Compatibility
+Locally signed prototype artifacts are in `artifacts/virtual-runtime/` when the existing private signing material is available. `Clone-Apps-v0.3.0-prototype.apk` retains application ID `org.parallelnest.app` and the release signing identity. Install `isolation-probe-v1-signed.apk` with that release host. Debug and release certificates differ: do not uninstall an existing app or replace its signing identity to force an update.
 
-| Android | API | Build/API support | Executed isolation tests |
-| --- | --- | --- | --- |
-| 13 | 33 | Minimum supported version; work-profile APIs available | See test report / CI; no unrecorded execution claim |
-| 14 | 34 | Supported APIs; activity-start restrictions accounted for | See test report / CI |
-| 15 | 35 | Creator PendingIntent opt-in; 16 KiB native/APK alignment | See test report / CI |
-| 16 | 36 | Compile and target SDK; native edge-to-edge UI | Android 16 x86_64 emulator, as recorded in test report |
+## Implemented and tested scope
 
-ARM64 native libraries are built and packaged; physical ARM64/OEM testing remains a release gate until evidence is recorded. Device policy, OEM restrictions, unavailable package APK files, paused profiles, profile conflicts, unsupported activity handlers and package-installation errors are reported to users. Popular third-party apps are compatibility targets, not guaranteed support entries. Notifications retain Android work-profile behavior and each app's notification permission; no mirroring or virtual notification support is claimed.
+- Actual copied APK Activity instantiation and lifecycle under two lazy subprocess slots.
+- Multiple UUIDs and virtual user IDs for one package; separate files, preferences, SQLite, caches and immutable APK revisions.
+- Guest startup acknowledgement, stop, selective deletion, re-launch and same-signature guest updates that retain data.
+- Compose discovery/search/selection, creation progress, dashboard launch, renaming, numbered instances and instance-specific shortcuts.
+- Explicit Room 1→2 migration preserving historical rows and pending requests. Rust registry schema 3 with schemas 1/2 upgrade support and multi-instance regression tests.
+- Traversal checks, symlink-safe deletion, package/signature/hash validation and explicit unsupported permission decisions.
+- Metadata backup/restore; original Bluetooth manager/file-sharing UI, themes, licenses and diagnostics.
 
-## Build on Windows / Android Studio
+See [architecture and exact Android API limits](docs/VIRTUAL-RUNTIME.md), [compatibility and test evidence](docs/VIRTUAL-COMPATIBILITY.md) and [release signing](docs/SIGNING.md). Physical ARM64 results must be recorded separately from emulator evidence. Nothing here claims Play Services, login, Play Integrity or hardware-backed attestation support.
 
-Prerequisites: Java 17, Android Studio, Android SDK platform 36, build tools 36.0.0, NDK **27.1.12297006**, Python 3 and Rust **1.99.0**. Set `ANDROID_HOME` and `JAVA_HOME`, accept SDK licenses, and open this repository in Android Studio.
+## Existing installations
 
-```powershell
-rustup toolchain install 1.99.0
-rustup target add aarch64-linux-android x86_64-linux-android
-cargo test --manifest-path rust-core/Cargo.toml --locked
-./scripts/build-rust.ps1
-./gradlew.bat :app:assembleDebug :isolation-probe:assembleDebug :app:testDebugUnitTest :app:lintDebug
-python scripts/verify-apk.py app/build/outputs/apk/debug/app-debug.apk
-```
+Historical work-profile data and records are preserved. **Settings → Legacy work-profile recovery** appears when those records exist and can launch an existing legacy copy. New clone operations always select the virtual engine. The setup/provisioning route is removed; existing profiles are never automatically deleted or imported. Do not remove a profile to try this prototype. Historical behavior is documented in [v0.2.0 notes](docs/LEGACY-WORK-PROFILE.md).
 
-The default Windows Rust host needs Visual Studio C++ Build Tools. A MinGW installation can instead use the `1.99.0-x86_64-pc-windows-gnu` toolchain with `RUSTUP_TOOLCHAIN` set for the command session. Install both Android targets on that toolchain. The native build script accepts `-Ndk` to point at an alternate NDK location; use the pinned version for reproducibility. Source-controlled Gradle wrapper and Cargo.lock pin the build. `app:preBuild` intentionally fails if either JNI ABI is missing.
+## Build
 
-## Build on Ubuntu
+JDK 17, Android SDK/build tools 36, NDK 27.1.12297006 and the pinned Rust toolchain are required. Set `ANDROID_HOME`.
 
-```bash
-rustup show
+```sh
 cargo test --manifest-path rust-core/Cargo.toml --locked
 bash scripts/build-rust.sh
-chmod +x gradlew
-./gradlew :app:assembleDebug :isolation-probe:assembleDebug :app:testDebugUnitTest :app:lintDebug
+./gradlew :app:testDebugUnitTest :app:lintDebug :app:lintRelease :core:lintDebug :clone-engine:lintDebug :ui:lintDebug :isolation-probe:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :isolation-probe:assembleDebug
 python3 scripts/verify-apk.py app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Set `ANDROID_HOME`; optionally set `ANDROID_NDK_HOME` to the pinned NDK. The shell script uses the NDK's Android clang linkers directly, so cargo-ndk is not required. Both ELF segment alignment and APK zip alignment are checked at 16 KiB. The Java/JNI entry point is retained through R8.
+On Windows use `scripts/build-rust.ps1` and `gradlew.bat`. The runtime has no imported native hooks; Rust libraries are rebuilt for ARM64 and x86_64 with 16 KiB ELF alignment. APK alignment is verified separately. Dependencies remain locked.
 
-## Tests and reproducibility
+## Repeatable device tests
 
-Run `./gradlew :app:connectedDebugAndroidTest` with a disposable emulator/test device. Set `ANDROID_SERIAL` when multiple devices are connected. Instrumentation exercises native schema rejection, Keystore encryption, forged bridge rejection, Bluetooth permission/scanning lifecycle, temporary URI sharing grants and the native Compose interface. Rust tests cover duplicate IDs/environment pairs, traversal/malformed packages, schema/field rejection, size bounds, invalid profile and serialization.
+Use a disposable test device with USB debugging. The harness installs test APKs and writes a first-party probe sentinel; it never requests root, clears app data or provisions a profile.
 
-The manual isolation protocol and execution evidence are in [docs/TEST-RESULTS.md](docs/TEST-RESULTS.md). Only the first-party probe's debug private preferences are inspected during tests; the production manager never extracts guest private data. Screenshots below come from the actual running emulator, not mockups.
+```sh
+python3 scripts/test-virtual-runtime.py --serial emulator-5556 --api 36 --reboot --host-update
+```
 
-| Onboarding | Android consent |
-| --- | --- |
-| ![Actual onboarding](docs/screenshots/onboarding.png) | ![Android work-profile consent](docs/screenshots/profile-consent.png) |
+The harness checks actual guest UI, two instances, preferences/files/SQLite independence, original-app preservation, lifecycle, update, deletion, the full Compose flow, migration, traversal, existing security/Bluetooth tests, force-stop, reboot and host APK replacement. It records the device API/ABI/fingerprint, APK hash, screenshots and logs under `build/virtual-evidence/api-N/`.
 
-| Personal probe: UID 10216 | Work probe: UID 1010216 |
-| --- | --- |
-| ![Personal persistent value](docs/screenshots/probe-personal.png) | ![Independent work persistent value](docs/screenshots/probe-work.png) |
+To test a genuinely newer guest, build the probe with `-PprobeVersionCode=2`, retain that APK separately, and pass `--guest-update-apk path/to/probe-v2.apk`. Start the harness with the v1 probe at its usual build path. CI performs these steps for APIs 33–36; configuring a matrix does not itself establish a passing run.
 
-![Actual Clone Apps dashboard](docs/screenshots/home-v2.png)
+For a physical test phone that already uses the production signing identity, use the matching signed instrumentation kit instead of the ordinary debug APKs:
 
-## Bluetooth devices and file sharing
+```sh
+python3 scripts/test-virtual-runtime.py --serial <phone-serial> --api <phone-api> --reboot --host-update --host-apk artifacts/virtual-runtime/Clone-Apps-device-test.apk --test-apk artifacts/virtual-runtime/Clone-Apps-device-tests.apk --probe-apk artifacts/virtual-runtime/isolation-probe-v1-signed.apk --guest-update-apk artifacts/virtual-runtime/isolation-probe-v2-signed.apk
+```
 
-Open **Bluetooth** from the toolbar or **Settings → Bluetooth devices & file sharing**. No work profile is required for this feature. Grant Clone Apps's **Nearby devices** permission to see paired devices, scan for discoverable classic Bluetooth devices and request Android pairing. Scans stop after 15 seconds or when the screen leaves the foreground. Use **Turn on Bluetooth** for Android's enable-consent prompt and **Bluetooth settings** for accessory configuration. Device names and addresses are held only in memory; no background service, internet upload or location permission is used. BLE/GATT interactions and accessory-specific services belong in the relevant accessory app.
+The kit's host is debuggable for instrumentation; use the minified prototype APK for normal use. Check the phone's installed probe version before selecting a baseline: the harness rejects a downgrade or signing mismatch rather than uninstalling or clearing data. Physical evidence is saved under `build/virtual-evidence/api-N-physical/`.
 
-**Choose a file to send** opens Android's document picker, then the standard share menu. Choose **Bluetooth** and the receiving device. Android handles file transfer/progress; the receiver must support Bluetooth file sharing and the OS must expose a compatible sharing destination. Only the selected content URI receives a temporary read grant; Clone Apps does not copy private clone data, request broad storage access or retain the file URI.
+No merge is authorized by a green build alone. General third-party hosting, two permitted third-party app tests and physical ARM64 feature coverage remain acceptance gates.
 
-![Native Bluetooth manager](docs/screenshots/bluetooth-manager.png)
+## License
 
-## Bluetooth in cloned apps
-
-Clone Apps allows outgoing Bluetooth sharing in its own work profile, including after an app update. Android otherwise blocks that sharing by default for managed profiles ([UserManager policy](https://developer.android.com/reference/android/os/UserManager#DISALLOW_BLUETOOTH_SHARING)). It does not change a different administrator's restrictions.
-
-Turn Bluetooth on and pair your device in Android settings. Resume the work profile and launch the work copy, then grant that app's **Nearby devices** permission when it asks. Each work app requests the Bluetooth permissions its features need; Android documents scanning, advertising and connecting separately ([Bluetooth permissions](https://developer.android.com/develop/connectivity/bluetooth/bt-permissions)). Open **Work app info & storage → Permissions** if permission was previously denied. A frozen app must be resumed before using Bluetooth.
-
-Settings offers **Check work Bluetooth access** and **Open Bluetooth settings**. The manager does not impersonate an adapter, grant runtime permissions silently or export work contacts. Its own Bluetooth screen requests permissions separately from work apps. The independent probe can request `BLUETOOTH_CONNECT` and read adapter state/paired-device count inside its work copy. On the local Android 16 emulator it returned **Bluetooth API accessible · on · 0 paired devices**, with permission granted to user 10 and denied to user 0. Physical pairing, BLE scanning, GATT/RFCOMM transfer and third-party Bluetooth behavior still need real hardware tests.
-
-![Work-profile Bluetooth API check](docs/screenshots/probe-bluetooth.png)
-
-## CI and release signing
-
-`.github/workflows/android.yml` builds both Rust Android targets, runs Rust/Kotlin tests and lint, builds debug and unsigned release APKs, verifies native alignment, uploads artifacts, and runs Android instrumentation on API 33/34/35/36 emulators. A `v*` tag publishes a **prerelease** with APKs and corresponding source only after build and instrumentation jobs succeed. CI execution status is separate from local results.
-
-Repository release secrets:
-
-- `ANDROID_KEYSTORE_BASE64`: base64 encoded release keystore.
-- `ANDROID_KEYSTORE_PASSWORD`: store password.
-- `ANDROID_KEY_ALIAS`: signing alias.
-- `ANDROID_KEY_PASSWORD`: key password.
-
-Without these secrets, releases provide an installable **debug** APK and a clearly named **unsigned** release artifact. GitHub runners may generate different debug certificates between runs, so debug APKs are not a production update channel. Protect and consistently use one release signing identity for updateable production distribution. No release keystore/password is checked into the repository. Local release signing can use `SIGNING_STORE_FILE`, `SIGNING_STORE_PASSWORD`, `SIGNING_KEY_ALIAS` and `SIGNING_KEY_PASSWORD` environment variables.
-
-## Privacy, limits and licensing
-
-No INTERNET, QUERY_ALL_PACKAGES, broad storage, accessibility-service, VPN, usage-access or notification-listener permission. Package installation/deletion and Nearby devices permissions are justified by explicit user actions. The manager cannot back up arbitrary app data, read guest private caches, guarantee third-party account acceptance, evade Integrity checks, host unlimited virtual copies or silently take over an existing controller.
-
-Original project: Apache-2.0. [NOTICE](NOTICE), [license distribution](licenses/README.md), [complete runtime dependency notices](app/src/main/assets/third-party-notices.txt). Island and Shelter informed the source review; no GPL or proprietary engine was copied or linked. BlackBox/NewBlackbox/VirtualApp are not included. Changes to dependencies must regenerate and review the notices before release.
-
-See the [security review and scoped dependency advisory check](docs/SECURITY-REVIEW.md). The actual dark settings screen is shown below.
-
-![Actual dark settings](docs/screenshots/settings-dark.png)
+Original code is Apache-2.0; see [LICENSE](LICENSE) and [NOTICE](NOTICE). Unresolved third-party virtualization code and binaries are not bundled. Dependencies have their own notices in the application.

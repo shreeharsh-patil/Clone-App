@@ -1,148 +1,24 @@
 package org.parallelnest.app
 
-import android.content.Context
-import android.content.pm.ApplicationInfo
-import android.os.Build
-import android.os.UserManager
+import android.content.Intent
+import android.content.pm.PackageManager
 import androidx.test.platform.app.InstrumentationRegistry
-import androidx.test.uiautomator.*
-import kotlinx.coroutines.*
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
-import org.junit.Assume.assumeTrue
 import org.junit.Test
-import org.parallelnest.app.core.CloneInfo
-import java.io.File
 
-/** Disposable-emulator test. All admin consent is clicked in the OS UI, never auto-approved by the application. */
+/** Regression coverage for removal of the old provisioning flow. */
 class WorkProfileFlowTest {
-    private val instrumentation = InstrumentationRegistry.getInstrumentation()
-    private val context: Context = instrumentation.targetContext
-    private val device = UiDevice.getInstance(instrumentation)
-    private val nest get() = context.applicationContext as NestApplication
-    private fun click(selector: BySelector, timeout: Long = 15_000) {
-        val deadline=System.currentTimeMillis()+timeout
-        while(System.currentTimeMillis()<deadline) {
-            val node=device.wait(Until.findObject(selector),1_000) ?: continue
-            try { node.click();return } catch(_: StaleObjectException) {
-                // Compose may replace nodes when discovery/search completes.
-                // Reacquire the visible node; never keep an obsolete reference.
-                device.waitForIdle()
-            }
-        }
-        fail("Missing or unstable UI action: $selector")
-    }
-    private fun click(text: String, timeout: Long = 15_000) {
-        click(By.text(text),timeout)
-    }
-    private fun startManager() { device.executeShellCommand("am start --user 0 -n org.parallelnest.app/.MainActivity"); device.wait(Until.hasObject(By.text("Clone Apps")),15_000) }
-    private fun saveProbe(value: String) {
-        val input = device.wait(Until.findObject(By.clazz("android.widget.EditText")),15_000)
-        assertNotNull(input)
-        input.text = value
-        click("Save value")
-        assertTrue(device.wait(Until.hasObject(By.text("Saved: $value")),10_000))
-        if(device.hasObject(By.pkg("com.google.android.inputmethod.latin")))device.pressBack()
-    }
-    private fun screenshot(name: String) {
-        val folder = File(context.getExternalFilesDir(null),"evidence").apply { mkdirs() }
-        device.takeScreenshot(File(folder,"$name.png"))
-    }
-    private suspend fun awaitConsent(result: Deferred<*>) {
-        val deadline = System.currentTimeMillis()+120_000
-        while(!result.isCompleted && System.currentTimeMillis()<deadline) {
-            device.findObject(By.text("Install"))?.click()
-            device.findObject(By.text("Settings"))?.takeIf { device.hasObject(By.textContains("unknown apps")) }?.click()
-            device.findObject(By.text("Allow from this source"))?.let {
-                val toggle=device.findObject(By.pkg("com.android.settings").checkable(true))
-                if(toggle!=null && !toggle.isChecked) toggle.click()
-                // Android 16 Settings uses a Compose checkable row and can return
-                // to the installer automatically. Back then cancels installation.
-                if(!device.wait(Until.gone(By.text("Allow from this source")),3_000)) {
-                    assertTrue("Unknown-source consent must be enabled before returning",device.wait(Until.hasObject(By.pkg("com.android.settings").checkable(true).checked(true)),5_000))
-                    device.pressBack()
-                    device.wait(Until.gone(By.text("Allow from this source")),5_000)
-                }
-            }
-            delay(300)
-        }
-        check(result.isCompleted) { "Operation did not complete after system consent" }
-    }
-    @Test fun createLaunchAndSeparatePersistentValues() = runBlocking {
-        assumeTrue("Full profile provisioning is tested on API 36",Build.VERSION.SDK_INT==36)
-        assumeTrue("Only requested by disposable-emulator CI",InstrumentationRegistry.getArguments().getString("profileFlow") == "true")
-        val probe=context.packageManager.getApplicationInfo("org.parallelnest.probe",0)
-        assertTrue("Only first-party debuggable fixture may be inspected",probe.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0)
-        device.executeShellCommand("am start --user 0 -n org.parallelnest.probe/.ProbeActivity")
-        saveProbe("PERSONAL_SENTINEL_2026")
-        screenshot("personal-before")
-        startManager()
-        click("Add App")
-        val search=device.wait(Until.findObject(By.desc("Search apps")),15_000)
-        assertNotNull(search);search.click()
-        val input=device.wait(Until.findObject(By.clazz("android.widget.EditText")),10_000)
-        assertNotNull(input);input.text="Clone Apps Probe"
-        // Accessibility setText does not necessarily open the keyboard. Back
-        // without an IME would leave Device Apps and invalidate its checkbox.
-        if(device.hasObject(By.pkg("com.google.android.inputmethod.latin")))device.pressBack()
-        assertTrue("Filtered discovery must show the installed fixture",device.wait(Until.hasObject(By.text("org.parallelnest.probe")),10_000))
-        click(By.clazz("android.widget.CheckBox"),10_000)
-        assertTrue("Selecting the actual fixture must update the Install count",device.wait(Until.hasObject(By.text("Install (1)")),10_000))
-        click("Install (1)")
-        assertTrue(device.wait(Until.hasObject(By.text("Set up work profile")),15_000))
-        var checkbox=device.wait(Until.findObject(By.clazz("android.widget.CheckBox")),5_000)
-        repeat(3) {
-            if(checkbox==null) {
-                device.swipe(device.displayWidth/2,device.displayHeight*4/5,device.displayWidth/2,device.displayHeight/3,20)
-                checkbox=device.wait(Until.findObject(By.clazz("android.widget.CheckBox")),2_000)
-            }
-        }
-        assertNotNull("Provisioning explanation/consent checkbox",checkbox)
-        click(By.clazz("android.widget.CheckBox"))
-        click("Create work profile")
-        click("Accept & continue",30_000)
-        screenshot("android-profile-consent")
-        click("Next",120_000)
-        val deadline=System.currentTimeMillis()+30_000
-        while(!nest.engine.status().bridgeAvailable && System.currentTimeMillis()<deadline)delay(300)
-        assertTrue(nest.engine.status().description,nest.engine.status().bridgeAvailable)
-        startManager()
-        val app=nest.engine.listSupportedApps().first { it.packageName=="org.parallelnest.probe" }
-        // Reproduces an app update between selection and installation: the
-        // previously selected source path no longer exists. The engine must
-        // resolve the current installed fixture rather than trust that path.
-        val created=async(Dispatchers.Default){nest.engine.createInstance(app.copy(paths=listOf("/data/app/stale-selection.apk")),"Probe · Work")}
-        awaitConsent(created)
-        val installResult=created.await()
-        if(!installResult.success)screenshot("install-failure")
-        assertTrue(installResult.toString(),installResult.success)
-        val row=nest.engine.getInstances().single { it.packageName==app.packageName }
-        startManager()
-        assertTrue(nest.engine.launchInstance(row).success)
-        assertTrue(device.wait(Until.hasObject(By.text("WORK PROFILE")),15_000))
-        saveProbe("WORK_SENTINEL_2026")
-        screenshot("work-after")
-        click("Check Bluetooth")
-        val allow=device.wait(Until.findObject(By.text("Allow")),10_000)
-        assertNotNull("Work app must request its own Nearby devices consent",allow)
-        allow.click()
-        assertTrue("Android Bluetooth API must return a capability result inside the work app",device.wait(Until.hasObject(By.textStartsWith("Bluetooth API accessible")),15_000) || device.hasObject(By.text("Bluetooth hardware unavailable")))
-        screenshot("work-bluetooth-permission")
-        val workUser=Regex("UserInfo\\{(\\d+):Clone Apps:").find(device.executeShellCommand("pm list users"))!!.groupValues[1]
-        val personal=device.executeShellCommand("run-as org.parallelnest.probe --user 0 cat shared_prefs/probe.xml")
-        val work=device.executeShellCommand("run-as org.parallelnest.probe --user $workUser cat shared_prefs/probe.xml")
-        assertTrue(personal,personal.contains("PERSONAL_SENTINEL_2026"))
-        assertFalse(personal.contains("WORK_SENTINEL_2026"))
-        assertTrue(work,work.contains("WORK_SENTINEL_2026"))
-        assertFalse(work.contains("PERSONAL_SENTINEL_2026"))
-        startManager()
-        val bluetooth=nest.profileEngine.request("bluetooth")
-        assertFalse(bluetooth.getStringExtra("message").orEmpty().contains("restricted"))
-        startManager()
-        assertTrue(nest.engine.stopInstance(row).success)
-        assertTrue(nest.engine.getInstances().single { it.id==row.id }.suspended)
-        startManager()
-        assertTrue(nest.engine.launchInstance(row).success)
-        assertTrue(device.wait(Until.hasObject(By.text("Saved: WORK_SENTINEL_2026")),15_000))
-        println("ISOLATION_PASS serial=${row.profile} personal=PERSONAL_SENTINEL_2026 work=WORK_SENTINEL_2026 suspension/resume=true")
+    @Test fun newEngineHasNoManagedProfileProvisioningRoute() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val nest = context.applicationContext as NestApplication
+        assertEquals("virtual", nest.engine.status().type)
+        assertTrue(nest.engine.status().supportsMultipleInstances)
+        val manifest = context.packageManager.getPackageInfo(context.packageName, PackageManager.PackageInfoFlags.of(PackageManager.GET_ACTIVITIES.toLong()))
+        assertFalse(manifest.activities.orEmpty().any { it.name.endsWith(".ProvisionActivity") })
+        assertTrue(context.packageManager.queryIntentActivities(Intent("android.app.action.PROVISION_MANAGED_PROFILE").setPackage(context.packageName), PackageManager.ResolveInfoFlags.of(0)).isEmpty())
+        val legacy = nest.registry.snapshot().filter { it.engine=="work_profile" }
+        nest.engine.getInstances()
+        assertEquals(legacy, nest.registry.snapshot().filter { it.engine=="work_profile" })
     }
 }

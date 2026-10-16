@@ -1,3 +1,5 @@
+> Historical work-profile release document. The current feature branch uses the limited first-party Activity runtime; see [runtime architecture](VIRTUAL-RUNTIME.md), [candidate audit](VIRTUAL-RUNTIME-AUDIT.md) and [current compatibility evidence](VIRTUAL-COMPATIBILITY.md).
+
 Clone Apps alpha: an original Kotlin/Compose work-profile manager with a Rust metadata validator.
 
 Work profiles support one additional copy of a package. Experimental virtual containers are disabled. App compatibility varies; consult docs/TEST-RESULTS.md for the exact tested configuration. No physical-device/OEM claim is made without recorded execution evidence.

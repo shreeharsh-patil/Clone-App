@@ -1,0 +1,177 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 2,
+    "identityHash": "88f07790ed15d1ce57798b17f29ac7db",
+    "entities": [
+      {
+        "tableName": "instances",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `packageName` TEXT NOT NULL, `name` TEXT NOT NULL, `profile` INTEGER NOT NULL, `created` INTEGER NOT NULL, `lastLaunch` INTEGER NOT NULL, `accent` INTEGER NOT NULL, `number` INTEGER NOT NULL, `engine` TEXT NOT NULL, `environmentKey` TEXT NOT NULL DEFAULT '', `virtualUser` INTEGER NOT NULL DEFAULT -1, `runtime` TEXT NOT NULL DEFAULT 'legacy', `compatibility` TEXT NOT NULL DEFAULT 'legacy', `versionCode` INTEGER NOT NULL DEFAULT 0, `abi` TEXT NOT NULL DEFAULT 'unknown', PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "packageName",
+            "columnName": "packageName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "profile",
+            "columnName": "profile",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "created",
+            "columnName": "created",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastLaunch",
+            "columnName": "lastLaunch",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "accent",
+            "columnName": "accent",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "number",
+            "columnName": "number",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "engine",
+            "columnName": "engine",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "environmentKey",
+            "columnName": "environmentKey",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "''"
+          },
+          {
+            "fieldPath": "virtualUser",
+            "columnName": "virtualUser",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "-1"
+          },
+          {
+            "fieldPath": "runtime",
+            "columnName": "runtime",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'legacy'"
+          },
+          {
+            "fieldPath": "compatibility",
+            "columnName": "compatibility",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'legacy'"
+          },
+          {
+            "fieldPath": "versionCode",
+            "columnName": "versionCode",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "abi",
+            "columnName": "abi",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'unknown'"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_instances_environmentKey",
+            "unique": true,
+            "columnNames": [
+              "environmentKey"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_instances_environmentKey` ON `${TABLE_NAME}` (`environmentKey`)"
+          },
+          {
+            "name": "index_instances_packageName",
+            "unique": false,
+            "columnNames": [
+              "packageName"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_instances_packageName` ON `${TABLE_NAME}` (`packageName`)"
+          }
+        ]
+      },
+      {
+        "tableName": "pending_creations",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`nonce` TEXT NOT NULL, `packageName` TEXT NOT NULL, `name` TEXT NOT NULL, `created` INTEGER NOT NULL, PRIMARY KEY(`nonce`))",
+        "fields": [
+          {
+            "fieldPath": "nonce",
+            "columnName": "nonce",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "packageName",
+            "columnName": "packageName",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "name",
+            "columnName": "name",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "created",
+            "columnName": "created",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "nonce"
+          ]
+        }
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '88f07790ed15d1ce57798b17f29ac7db')"
+    ]
+  }
+}

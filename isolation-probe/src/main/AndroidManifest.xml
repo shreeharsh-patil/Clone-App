@@ -13,7 +13,9 @@
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.location" android:required="false" />
     <application android:allowBackup="false" android:label="Clone Apps Probe" android:theme="@android:style/Theme.Material.Light.NoActionBar">
-        <activity android:name=".ProbeActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter></activity>
+        <meta-data android:name="org.parallelnest.GUEST_PROTOCOL" android:value="1" />
+        <activity android:name=".GuestProbeActivity" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter></activity>
+        <activity android:name=".ProbeActivity" android:exported="true" />
         <service android:name=".ProbeJobService" android:exported="true" android:permission="android.permission.BIND_JOB_SERVICE" />
     </application>
 </manifest>

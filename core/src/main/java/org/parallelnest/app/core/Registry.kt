@@ -20,31 +20,28 @@ object NativeCore {
 }
 object RegistryCodec {
     fun mergeRestored(old: List<CloneInfo>, incoming: List<CloneInfo>): List<CloneInfo> {
-        val restored=incoming.associateBy { it.packageName to it.profile }
-        val merged=old.map { row -> restored[row.packageName to row.profile]?.copy(id=row.id) ?: row }.toMutableList()
-        incoming.filter { row -> old.none { it.packageName==row.packageName && it.profile==row.profile } }.forEach { row ->
+        fun identity(row: CloneInfo) = if(row.engine=="virtual") "virtual:${row.id}" else row.environmentKey
+        val restored=incoming.associateBy(::identity)
+        val merged=old.map { row -> restored[identity(row)]?.let { row.copy(name=it.name,accent=it.accent) } ?: row }.toMutableList()
+        incoming.filter { row -> old.none { identity(it)==identity(row) } }.forEach { row ->
             merged += row.copy(id=if(merged.any { it.id==row.id }) UUID.randomUUID().toString() else row.id)
         }
         return merged
     }
-    fun encode(rows: List<CloneInfo>)=JSONObject().put("schema",2).put("instances",JSONArray().apply {
+    fun encode(rows: List<CloneInfo>)=JSONObject().put("schema",3).put("instances",JSONArray().apply {
         rows.forEach { r -> put(JSONObject().put("id",r.id).put("package",r.packageName).put("name",r.name).put("profile",r.profile)
-            .put("created",r.created).put("last_launch",r.lastLaunch).put("accent",r.accent).put("number",r.number).put("engine",r.engine)) }
+            .put("created",r.created).put("last_launch",r.lastLaunch).put("accent",r.accent).put("number",r.number).put("engine",r.engine)
+            .put("virtual_user",r.virtualUser).put("runtime",r.runtime).put("compatibility",r.compatibility).put("version_code",r.versionCode).put("abi",r.abi)) }
     }).toString()
     /** Upgrade old metadata without retaining the removed launch-security feature. */
     fun upgrade(text: String): String {
         require(text.toByteArray().size<=1_048_576) { "Metadata exceeds 1 MiB" }
         val root=JSONObject(text)
-        if(root.getInt("schema")==1) {
-            val entries=root.getJSONArray("instances")
-            for(i in 0 until entries.length()) entries.getJSONObject(i).apply { remove("locked");put("number",1);put("engine","work_profile") }
-            root.put("schema",2)
-        }
         return NativeCore.canonicalize(root.toString())
     }
     fun decode(text: String): List<CloneInfo> {
         val entries=JSONObject(text).getJSONArray("instances")
-        return (0 until entries.length()).map { entries.getJSONObject(it).let { r -> CloneInfo(r.getString("id"),r.getString("package"),r.getString("name"),r.getLong("profile"),r.getLong("created"),r.getLong("last_launch"),r.getInt("accent"),r.getInt("number"),r.getString("engine")) } }
+        return (0 until entries.length()).map { entries.getJSONObject(it).let { r -> CloneInfo(r.getString("id"),r.getString("package"),r.getString("name"),r.getLong("profile"),r.getLong("created"),r.getLong("last_launch"),r.getInt("accent"),r.getInt("number"),r.getString("engine"),virtualUser=r.optLong("virtual_user",-1),runtime=r.optString("runtime","legacy"),compatibility=r.optString("compatibility","legacy"),versionCode=r.optLong("version_code",0),abi=r.optString("abi","unknown")) } }
     }
     fun checked(rows: List<CloneInfo>)=decode(NativeCore.canonicalize(encode(rows)))
 }
@@ -83,7 +80,7 @@ class Registry(context: Context) {
             if(success) {
                 require(profile>=0) { "Missing managed-profile identity" }
                 val rows=dao.snapshot().map { it.model() }
-                if(rows.none { it.packageName==pending.packageName && it.profile==profile }) {
+                if(rows.none { it.engine=="work_profile" && it.packageName==pending.packageName && it.profile==profile }) {
                     val created=CloneInfo(UUID.randomUUID().toString(),pending.packageName,pending.name,profile,pending.created)
                     dao.insert(RegistryCodec.checked(rows+created).filter { it.id==created.id }.map(CloneRecord::from))
                 }
@@ -100,12 +97,12 @@ class Registry(context: Context) {
     suspend fun textSetting(name: String,value: String) { context.nestData.edit { it[stringPreferencesKey(name)]=value } }
     suspend fun backup(): String {
         val prefs=settings.first()
-        return JSONObject().put("schema",2).put("registry",JSONObject(RegistryCodec.encode(snapshot()))).put("theme",prefs[stringPreferencesKey("theme")] ?: "dark").toString(2)
+        return JSONObject().put("schema",3).put("registry",JSONObject(RegistryCodec.encode(snapshot()))).put("theme",prefs[stringPreferencesKey("theme")] ?: "dark").toString(2)
     }
-    suspend fun restore(text: String,available: Set<Pair<String,Long>>): Int {
+    suspend fun restore(text: String,available: Set<Pair<String,Long>>, virtualIds: Set<String> = emptySet()): Int {
         require(text.toByteArray().size<=1_048_576) { "Backup exceeds 1 MiB" }
-        val root=JSONObject(text);require(root.getInt("schema") in 1..2) { "Unsupported backup version" }
-        val incoming=RegistryCodec.decode(RegistryCodec.upgrade(root.getJSONObject("registry").toString())).filter { it.packageName to it.profile in available }
+        val root=JSONObject(text);require(root.getInt("schema") in 1..3) { "Unsupported backup version" }
+        val incoming=RegistryCodec.decode(RegistryCodec.upgrade(root.getJSONObject("registry").toString())).filter { if(it.engine=="virtual") it.id in virtualIds else it.packageName to it.profile in available }
         val theme=root.optString("theme","dark");require(theme in listOf("system","light","dark")) { "Unknown theme" }
         update { RegistryCodec.mergeRestored(it,incoming) };textSetting("theme",if(theme=="light") "system" else theme)
         return incoming.size

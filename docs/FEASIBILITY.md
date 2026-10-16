@@ -1,3 +1,5 @@
+> Historical work-profile release document. The current feature branch uses the limited first-party Activity runtime; see [runtime architecture](VIRTUAL-RUNTIME.md), [candidate audit](VIRTUAL-RUNTIME-AUDIT.md) and [current compatibility evidence](VIRTUAL-COMPATIBILITY.md).
+
 # Feasibility and source review
 
 Research snapshot: 13 October 2026. Repositories were cloned with `git clone --depth 1` and their actual source/build files inspected. This is a source review, not a claim that upstream engines were built or tested. No upstream cloning engine code is incorporated.
