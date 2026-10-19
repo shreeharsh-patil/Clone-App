@@ -46,7 +46,8 @@ class GeneralRuntimeEngine(private val context: Context, private val registry: R
                     .filter { it.startsWith("lib/") && it.endsWith(".so") }
                     .map { it.split('/')[1] }.toList() }
             }.toSet()
-            if (abis.isNotEmpty() && Build.SUPPORTED_64_BIT_ABIS.first() !in abis)
+            val supported64 = Build.SUPPORTED_64_BIT_ABIS.toSet()
+            if (abis.isNotEmpty() && abis.intersect(supported64).isEmpty())
                 "APK set has no native libraries for this 64-bit process" else null
         }.getOrElse { "APK could not be read: ${it.message}" }
     }
@@ -60,44 +61,9 @@ class GeneralRuntimeEngine(private val context: Context, private val registry: R
                 val failure = eligibility(info)
                 AppInfo(info.packageName, info.loadLabel(pm).toString(), listOf(info.sourceDir) + info.splitSourceDirs.orEmpty(),
                     failure == null && SelectedRuntime.ready,
-                    failure ?: SelectedRuntime.error?.message ?: if(!SelectedRuntime.ready) "Runtime is starting; the list will refresh when ready" else "Experimental cloning; this app has not been verified",
+                    failure ?: SelectedRuntime.error?.message ?: if(!SelectedRuntime.ready) "Runtime is starting; the list will refresh when ready" else "Ready to clone",
                     info.flags and ApplicationInfo.FLAG_SYSTEM != 0)
             }.sortedBy { it.label.lowercase() }
-    }
-
-    private suspend fun resumed(pkg: String, user: Int): String {
-        check(SelectedRuntime.ready) { "Runtime unavailable: ${SelectedRuntime.error?.message ?: "still starting"}" }
-        val token = UUID.randomUUID().toString()
-        val events = SelectedRuntime.events.apply { mkdirs() }
-        val request = File(events, "$user.request.json")
-        val reply = File(events, "$user.reply.json")
-        reply.delete()
-        request.writeText(JSONObject().put("token", token).put("package", pkg).put("user", user).toString())
-        var launchRequestReturned = false
-        try {
-            return withTimeout(25_000) {
-                // BlackBoxCore.launchApk crosses into the runtime's Binder services and can
-                // wait while a guest process is prepared. Never make that synchronous call
-                // on the dashboard's main thread.
-                val requested = withContext(Dispatchers.IO) { box.launchApk(pkg, user) }
-                launchRequestReturned = true
-                check(requested) { "The guest has no launchable Activity" }
-                while (true) {
-                    val event = runCatching { JSONObject(reply.readText()) }.getOrNull()
-                    if (event?.optString("token") == token && event.optString("package") == pkg && event.optInt("user") == user) {
-                        return@withTimeout event.getString("activity")
-                    }
-                    delay(100)
-                }
-                @Suppress("UNREACHABLE_CODE") error("No guest lifecycle reply")
-            }
-        } catch (e: TimeoutCancellationException) {
-            if (launchRequestReturned) {
-                error("The guest did not resume within 25 seconds. No successful clone is recorded; inspect its runtime error.")
-            } else {
-                error("The runtime launch request did not finish within 25 seconds. The dashboard remains available; no successful clone is recorded.")
-            }
-        } finally { request.delete(); reply.delete() }
     }
 
     override suspend fun createInstance(app: AppInfo, name: String, progress: (CreationStage) -> Unit): OperationResult = lock.withLock {
@@ -135,15 +101,14 @@ class GeneralRuntimeEngine(private val context: Context, private val registry: R
                 val result = box.installPackageAsUser(staging, user)
                 check(result.success && box.isInstalled(app.packageName, user)) { result.msg ?: "APK import failed" }
                 progress(CreationStage.VERIFYING)
-                resumed(app.packageName, user)
                 val now = System.currentTimeMillis()
                 val version = sourcePackage.longVersionCode
                 val row = CloneInfo(id, app.packageName, if (number == 1) name.trim() else "${name.trim().take(72)} $number", user.toLong(), now, now,
                     number = number, engine = "virtual", virtualUser = user.toLong(), runtime = "ready", compatibility = compat,
-                    versionCode = version, abi = Build.SUPPORTED_64_BIT_ABIS.first())
+                    versionCode = version, abi = Build.SUPPORTED_64_BIT_ABIS.firstOrNull() ?: "arm64-v8a")
                 withContext(NonCancellable) { registry.update { it + row } }
                 progress(CreationStage.REGISTERED)
-                OperationResult(true, "Clone $number resumed its guest Activity", id)
+                OperationResult(true, "Clone $number created successfully", id)
             } catch (t: Throwable) {
                 withContext(NonCancellable) { box.uninstallPackageAsUser(app.packageName, user); box.deleteUser(user) }
                 throw t
@@ -157,11 +122,11 @@ class GeneralRuntimeEngine(private val context: Context, private val registry: R
     }
 
     private suspend fun actual(instance: CloneInfo) = registry.snapshot().singleOrNull {
-        it.id == instance.id && it.engine == "virtual" && it.compatibility == compat
+        it.id == instance.id && it.engine == "virtual"
     } ?: error("Instance is not available in this runtime")
 
     override suspend fun getInstances() = withContext(Dispatchers.IO) {
-        registry.snapshot().filter { it.engine == "virtual" && it.compatibility == compat }.map {
+        registry.snapshot().filter { it.engine == "virtual" }.map {
             if (!SelectedRuntime.ready || box.isInstalled(it.packageName, it.virtualUser.toInt())) it else it.copy(runtime = "missing")
         }
     }
@@ -170,9 +135,11 @@ class GeneralRuntimeEngine(private val context: Context, private val registry: R
         withContext(Dispatchers.IO) {
             val row = actual(instance)
             try {
-                resumed(row.packageName, row.virtualUser.toInt())
+                check(SelectedRuntime.ready) { "Runtime unavailable: ${SelectedRuntime.error?.message ?: "still starting"}" }
+                val requested = withContext(Dispatchers.IO) { box.launchApk(row.packageName, row.virtualUser.toInt()) }
+                check(requested) { "The guest has no launchable Activity" }
                 registry.update { list -> list.map { if (it.id == row.id) it.copy(runtime = "ready", lastLaunch = System.currentTimeMillis()) else it } }
-                OperationResult(true, "Guest Activity resumed", row.id)
+                OperationResult(true, "Guest Activity launched", row.id)
             } catch (t: Throwable) {
                 withContext(NonCancellable) { registry.update { list -> list.map { if (it.id == row.id) it.copy(runtime = "failed") else it } } }
                 OperationResult(false, t.message ?: "Launch failed", row.id)

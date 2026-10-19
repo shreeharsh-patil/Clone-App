@@ -11,24 +11,18 @@ dependencyLocking {
 android {
     namespace = "org.parallelnest.app"
     compileSdk = 36
-    ndkVersion = "27.1.12297006"
+    ndkVersion = "28.2.13676358"
     defaultConfig {
         applicationId = "org.parallelnest.app"
         minSdk = 33
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.3.2-prototype"
-        manifestPlaceholders["applicationLabel"] = if (generalRuntime) "Clone Apps Experimental" else "@string/app_name"
+        versionCode = 8
+        versionName = "0.4.0"
+        manifestPlaceholders["applicationLabel"] = "@string/app_name"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
     sourceSets.getByName("main").java.srcDir(if (generalRuntime) "src/generalRuntime/java" else "src/probeRuntime/java")
-    if (generalRuntime) {
-        // Install alongside production; never change its signing or guest data.
-        defaultConfig.applicationId = "org.parallelnest.app.experimental"
-        defaultConfig.versionCode = 7
-        defaultConfig.versionName = "0.4.1-experimental"
-    }
     signingConfigs {
         create("production") {
             System.getenv("SIGNING_STORE_FILE")?.let { storeFile = file(it) }

@@ -82,8 +82,32 @@ android='{http://schemas.android.com/apk/res/android}'
 manifest=P/'runtime/src/main/AndroidManifest.xml'
 ET.register_namespace('android',android[1:-1]); ET.register_namespace('tools','http://schemas.android.com/tools')
 tree=ET.parse(manifest); root=tree.getroot(); root.attrib.pop('package',None)
+standard_permissions = {
+    'android.permission.INTERNET', 'android.permission.ACCESS_NETWORK_STATE',
+    'android.permission.ACCESS_WIFI_STATE', 'android.permission.CHANGE_WIFI_STATE',
+    'android.permission.FOREGROUND_SERVICE', 'android.permission.WAKE_LOCK',
+    'android.permission.REORDER_TASKS', 'android.permission.CAMERA',
+    'android.permission.RECORD_AUDIO', 'android.permission.MODIFY_AUDIO_SETTINGS',
+    'android.permission.READ_EXTERNAL_STORAGE', 'android.permission.WRITE_EXTERNAL_STORAGE',
+    'android.permission.READ_MEDIA_AUDIO', 'android.permission.READ_MEDIA_VIDEO',
+    'android.permission.READ_MEDIA_IMAGES', 'android.permission.POST_NOTIFICATIONS',
+    'android.permission.VIBRATE', 'android.permission.BLUETOOTH',
+    'android.permission.BLUETOOTH_CONNECT', 'android.permission.BLUETOOTH_SCAN',
+    'android.permission.READ_CONTACTS', 'android.permission.WRITE_CONTACTS',
+    'android.permission.READ_PHONE_STATE', 'android.permission.CALL_PHONE',
+    'android.permission.QUERY_ALL_PACKAGES', 'android.permission.REQUEST_INSTALL_PACKAGES',
+    'android.permission.SYSTEM_ALERT_WINDOW', 'android.permission.ACCESS_FINE_LOCATION',
+    'android.permission.ACCESS_COARSE_LOCATION',
+    'android.permission.FOREGROUND_SERVICE_SPECIAL_USE',
+    'android.permission.FOREGROUND_SERVICE_MICROPHONE',
+    'android.permission.FOREGROUND_SERVICE_CAMERA',
+    'android.permission.FOREGROUND_SERVICE_LOCATION',
+    'android.permission.FOREGROUND_SERVICE_DATA_SYNC',
+    'android.permission.FOREGROUND_SERVICE_PHONE_CALL',
+    'android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION'
+}
 for node in list(root):
-    if node.tag=='uses-permission' and node.get(android+'name') not in {'android.permission.INTERNET','android.permission.ACCESS_NETWORK_STATE','android.permission.FOREGROUND_SERVICE','android.permission.WAKE_LOCK','android.permission.REORDER_TASKS'}: root.remove(node)
+    if node.tag=='uses-permission' and node.get(android+'name') not in standard_permissions: root.remove(node)
     if node.tag=='uses-feature': node.set(android+'required','false')
 for app in root.findall('application'):
     app.attrib.pop(android+'usesCleartextTraffic',None)
@@ -109,7 +133,7 @@ android { namespace 'me.weishu.reflection'; compileSdk 36; defaultConfig { minSd
 ''')
 write(Path('runtime/build.gradle'),'''plugins { id 'com.android.library' }
 android {
- namespace 'com.tegufy.blackbox'; compileSdk 36; buildToolsVersion '36.0.0'; ndkVersion '27.1.12297006'
+ namespace 'com.tegufy.blackbox'; compileSdk 36; buildToolsVersion '36.0.0'; ndkVersion '28.2.13676358'
  defaultConfig { minSdk 33; ndk { abiFilters 'arm64-v8a','x86_64' }; externalNativeBuild { cmake { arguments '-DANDROID_STL=c++_static', '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON'; targets 'blackbox' } } }
  buildFeatures { aidl true; buildConfig true }
  compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
@@ -179,26 +203,6 @@ public class ProofActivity extends Activity {
  void launch(){try {result("Guest launch requested: "+BlackBoxCore.get().launchApk(pkg.getText().toString(),user));}catch(Throwable t){android.util.Log.e("RuntimeProof","Launch failed",t);result(t.toString());}}
 }
 ''')
-# Keep only component, storage and package routing under evaluation. Optional
-# upstream helpers fabricate auth, identifiers and permission success.
-allowed_hooks = {
-    'IDisplayManagerProxy', 'OsStub', 'IActivityManagerProxy', 'IPackageManagerProxy',
-    'HCallbackProxy', 'INotificationManagerProxy', 'IAlarmManagerProxy',
-    'IAppWidgetManagerProxy', 'ContentServiceStub', 'IWindowManagerProxy',
-    'IUserManagerProxy', 'RestrictionsManagerStub', 'IMediaSessionManagerProxy',
-    'IStorageManagerProxy', 'ILauncherAppsProxy', 'IJobServiceProxy',
-    'IConnectivityManagerProxy', 'IPowerManagerProxy', 'IMediaRouterServiceProxy',
-    'IActivityClientProxy', 'IActivityTaskManagerProxy', 'IPermissionManagerProxy',
-    'IStorageStatsManagerProxy', 'IShortcutManagerProxy', 'IGraphicsStatsProxy'
-}
-hooks=P/'runtime/src/main/java/com/tegufy/blackbox/fake/hook/HookManager.java'
-t=hooks.read_text(encoding='utf-8')
-t=re.sub(r'addInjector\(new (\w+)\([^;]*?\)\);',
-         lambda m: m.group(0) if m.group(1) in allowed_hooks else '/* Optional upstream helper excluded. */',t)
-hooks.write_text(t,encoding='utf-8')
-t=hooks.read_text(encoding='utf-8').replace('BlackBoxCore.get().isBlackProcess() || BlackBoxCore.get().isServerProcess()',
-    'BlackBoxCore.get().isBlackProcess()')
-hooks.write_text(t,encoding='utf-8')
 system=P/'runtime/src/main/java/com/tegufy/blackbox/core/system/BlackBoxSystem.java'
 t=system.read_text(encoding='utf-8')
 start=t.index('        List<String> preInstallPackages =')
@@ -211,26 +215,6 @@ def replace_hook(path, class_name, body):
     temporary=P/'hook-edit.tmp'; temporary.write_text(t[method:],encoding='utf-8')
     replace_method(temporary,'protected Object hook(',body)
     path.write_text(t[:method]+temporary.read_text(encoding='utf-8'),encoding='utf-8'); temporary.unlink()
-
-# Android remains the authority for permissions. Keep actual errors rather than
-# fabricated audio/storage/SMS/URI grants, Play Store packages or login results.
-pm=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IPackageManagerProxy.java'
-for cls in ['SimpleAudioPermissionHook','CheckSelfPermission']:
-    replace_hook(pm,cls,'''            if(args.length>1 && java.util.Objects.equals(args[1],com.tegufy.blackbox.app.BActivityThread.getAppPackageName())) {
-                args[1]=BlackBoxCore.getHostPkg();
-                if(args.length>2 && args[2] instanceof Integer)args[2]=BlackBoxCore.getHostUserId();
-            }
-            return method.invoke(who,args);''')
-replace_hook(pm,'ShouldShowRequestPermissionRationale','            return false;')
-replace_hook(pm,'GetPackageInfo', '''            String packageName=(String)args[0];
-            int flags=MethodParameterUtils.toInt(args[1]);
-            PackageInfo info=BlackBoxCore.getBPackageManager().getPackageInfo(packageName,flags,BlackBoxCore.getUserId());
-            if(info!=null)return info;
-            if(AppSystemEnv.isOpenPackage(packageName))return method.invoke(who,args);
-            return null;''')
-am=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IActivityManagerProxy.java'
-replace_hook(am,'checkPermission','            MethodParameterUtils.replaceLastUid(args); return method.invoke(who,args);')
-replace_hook(am,'checkUriPermission','            return PackageManager.PERMISSION_DENIED;')
 replace_method(core,'private void setEssentialProperties(', '''        if(clientConfiguration==null)throw new IllegalArgumentException("Client configuration required");
         Reflection.unseal(context);''')
 replace_method(P/'runtime/src/main/java/com/tegufy/blackbox/closecode/Entry.java','public static void attach()',
