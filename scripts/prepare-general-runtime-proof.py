@@ -347,7 +347,13 @@ t=t.replace('return startActivityInSourceTask(intent,',
     'if (topActivityRecord == null) return startActivityInNewTaskLocked(userId, intent, activityInfo, resultTo, launchModeFlags);\n        return startActivityInSourceTask(intent,')
 stack.write_text(t,encoding='utf-8')
 
-# Bluetooth and permission runtime patches for guest applications (WhatsApp, calls, audio accessories)
+# Bluetooth, permission, and Google Play Services runtime patches for guest applications (WhatsApp, calls, audio accessories)
+env_file=P/'runtime/src/main/java/com/tegufy/blackbox/core/env/AppSystemEnv.java'
+t=env_file.read_text(encoding='utf-8')
+t=t.replace('sSystemPackages.add("com.google.android.webview");',
+            'sSystemPackages.add("com.google.android.gms");\n        sSystemPackages.add("com.android.vending");\n        sSystemPackages.add("com.google.android.gsf");\n        sSystemPackages.add("com.google.android.play.games");\n        sSystemPackages.add("com.google.android.webview");')
+env_file.write_text(t,encoding='utf-8')
+
 bt_helper='''
     private static boolean isBluetoothPermission(String permission) {
         if (permission == null) return false;
@@ -355,7 +361,9 @@ bt_helper='''
                 || permission.equals("android.permission.BLUETOOTH_ADMIN")
                 || permission.equals("android.permission.BLUETOOTH_CONNECT")
                 || permission.equals("android.permission.BLUETOOTH_SCAN")
-                || permission.equals("android.permission.BLUETOOTH_ADVERTISE");
+                || permission.equals("android.permission.BLUETOOTH_ADVERTISE")
+                || permission.equals("android.permission.ACCESS_FINE_LOCATION")
+                || permission.equals("android.permission.ACCESS_COARSE_LOCATION");
     }
 '''
 pm_proxy=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IPackageManagerProxy.java'
@@ -367,21 +375,412 @@ t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "
             'if (isAudioPermission(permission) || isBluetoothPermission(permission)) {\n                Slog.d(TAG, "CheckSelfPermission: Granting permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }')
 t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "ShouldShowRequestPermissionRationale: Not showing rationale for audio permission: " + permission);\n                return false;\n            }',
             'if (isAudioPermission(permission) || isBluetoothPermission(permission)) {\n                Slog.d(TAG, "ShouldShowRequestPermissionRationale: Not showing rationale for permission: " + permission);\n                return false;\n            }')
+
+pkg_info_old='''            if ("com.android.vending".equals(packageName)) {
+                return createFakeGooglePlayServicesPackageInfo();
+            }'''
+pkg_info_new='''            if ("com.google.android.gms".equals(packageName) || "com.android.vending".equals(packageName) || "com.google.android.gsf".equals(packageName)) {
+                try {
+                    PackageInfo hostPi = BlackBoxCore.getContext().getPackageManager().getPackageInfo(packageName, flags);
+                    if (hostPi != null) return hostPi;
+                } catch (Throwable ignored) {}
+                return createFakeGooglePlayServicesPackageInfo(packageName);
+            }'''
+t=t.replace(pkg_info_old,pkg_info_new)
+
+fake_info_old='''        private PackageInfo createFakeGooglePlayServicesPackageInfo() {
+            PackageInfo packageInfo = new PackageInfo();
+            packageInfo.packageName = "com.android.vending";
+            packageInfo.versionName = "33.8.16-21";
+            packageInfo.versionCode = 83381621;
+            
+            ApplicationInfo appInfo = new ApplicationInfo();
+            appInfo.packageName = "com.android.vending";
+            appInfo.name = "Google Play Store";
+            appInfo.flags = ApplicationInfo.FLAG_SYSTEM;
+            appInfo.uid = 10001; 
+            packageInfo.applicationInfo = appInfo;
+            
+            Slog.d(TAG, "GetPackageInfo: Providing fake Google Play Services info");
+            return packageInfo;
+        }'''
+fake_info_new='''        private static final String GOOGLE_PLAY_SERVICES_CERT = "308202cf308201b8a0030201020204481b0a8f300d06092a864886f70d01010405003077310b3009060355040613025553311330110603550408130a43616c69666f726e6961311630140603550407130d4d6f756e7461696e205669657731143012060355040a130b476f6f676c6520496e632e3110300e060355040b1307416e64726f69643110300e06035504031307416e64726f6964301e170d3038303530323034333633315a180f32303335303931383034333633315a3077310b3009060355040613025553311330110603550408130a43616c69666f726e6961311630140603550407130d4d6f756e7461696e205669657731143012060355040a130b476f6f676c6520496e632e3110300e060355040b1307416e64726f69643110300e06035504031307416e64726f696430819f300d06092a864886f70d010101050003818d0030818902818100bbda23d24e5a266a8775437812108861cfbf718870ba903c726ee9594b9f2c64b5e282d1b745fd57f5c9ef8f2c3dff2607e15d86efdf5472851cf571d87198d0ceee95ea32560e2db45bb8d154ee4ab0539f150390fa8b25be256d0dcfcd129f1b4c6e94916a695e1e93c8309e44bc6a193ff7db8a9e1e2d785721e25c15077b0203010001300d06092a864886f70d01010405000381810052cf75f3a02a8eb9c0b171f11e9f2d18449c2598be6cc7c1b5a5b5123d537f26c71c13d7894a4c14c81a6c1e5554f6d3f2824df9c336b1d120a1eb95d2c2069b2d861611cfab5d49f694e99f0be828a2b535d8b8a5d3f23a854dd546a3b2a26514782bb81254460f4a8e2cb65d836b8509c250550d51f2d3485c39247385a4";
+
+        private PackageInfo createFakeGooglePlayServicesPackageInfo(String pkg) {
+            PackageInfo packageInfo = new PackageInfo();
+            packageInfo.packageName = pkg;
+            packageInfo.versionName = "24.08.12 (190400-610000000)";
+            packageInfo.versionCode = 240812000;
+            try {
+                java.lang.reflect.Field f = PackageInfo.class.getField("longVersionCode");
+                f.setLong(packageInfo, 240812000L);
+            } catch (Throwable ignored) {}
+            ApplicationInfo appInfo = new ApplicationInfo();
+            appInfo.packageName = pkg;
+            appInfo.name = pkg;
+            appInfo.flags = ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_INSTALLED;
+            appInfo.enabled = true;
+            appInfo.uid = 10001;
+            packageInfo.applicationInfo = appInfo;
+            try {
+                android.content.pm.Signature sig = new android.content.pm.Signature(GOOGLE_PLAY_SERVICES_CERT);
+                packageInfo.signatures = new android.content.pm.Signature[] { sig };
+                if (BuildCompat.isPie()) {
+                    android.content.pm.PackageParser.SigningDetails details = android.content.pm.PackageParser.SigningDetails.UNKNOWN;
+                    black.android.content.pm.BRPackageParserSigningDetails.get(details)._set_signatures(packageInfo.signatures);
+                    packageInfo.signingInfo = black.android.content.pm.BRSigningInfo.get()._new(details);
+                }
+            } catch (Throwable t) {
+                Slog.w(TAG, "Failed to set signatures for " + pkg + ": " + t.getMessage());
+            }
+            Slog.d(TAG, "GetPackageInfo: Providing fake Google Play Services info for " + pkg);
+            return packageInfo;
+        }'''
+t=t.replace(fake_info_old,fake_info_new)
+
+perm_grant_old='''                        if (perm != null && (perm.equals(android.Manifest.permission.RECORD_AUDIO)
+                                || perm.equals("android.permission.FOREGROUND_SERVICE_MICROPHONE")
+                                || perm.equals(android.Manifest.permission.MODIFY_AUDIO_SETTINGS)
+                                || perm.equals(android.Manifest.permission.CAPTURE_AUDIO_OUTPUT))) {'''
+perm_grant_new='''                        if (perm != null && (perm.equals(android.Manifest.permission.RECORD_AUDIO)
+                                || perm.equals("android.permission.FOREGROUND_SERVICE_MICROPHONE")
+                                || perm.equals(android.Manifest.permission.MODIFY_AUDIO_SETTINGS)
+                                || perm.equals(android.Manifest.permission.CAPTURE_AUDIO_OUTPUT)
+                                || isBluetoothPermission(perm))) {'''
+t=t.replace(perm_grant_old,perm_grant_new)
+
+open_pkg_old='''            if (AppSystemEnv.isOpenPackage(packageName)) {
+                return method.invoke(who, args);
+            }'''
+open_pkg_new='''            if (AppSystemEnv.isOpenPackage(packageName)) {
+                if (args.length >= 3 && args[2] instanceof Integer) {
+                    args[2] = BlackBoxCore.getHostUserId();
+                }
+                try {
+                    return method.invoke(who, args);
+                } catch (Throwable t) {
+                    return null;
+                }
+            }'''
+t=t.replace(open_pkg_old,open_pkg_new)
 pm_proxy.write_text(t,encoding='utf-8')
+
+replace_hook(pm_proxy, 'GetApplicationInfo', '''            String packageName = (String) args[0];
+            int flags = MethodParameterUtils.toInt(args[1]);
+
+            if ("com.google.android.gms".equals(packageName) || "com.android.vending".equals(packageName) || "com.google.android.gsf".equals(packageName)) {
+                try {
+                    ApplicationInfo hostAi = BlackBoxCore.getContext().getPackageManager().getApplicationInfo(packageName, flags);
+                    if (hostAi != null) return hostAi;
+                } catch (Throwable ignored) {}
+                ApplicationInfo appInfo = new ApplicationInfo();
+                appInfo.packageName = packageName;
+                appInfo.name = packageName;
+                appInfo.flags = ApplicationInfo.FLAG_SYSTEM | ApplicationInfo.FLAG_INSTALLED;
+                appInfo.enabled = true;
+                appInfo.uid = 10001;
+                return appInfo;
+            }
+
+            ApplicationInfo applicationInfo = BlackBoxCore.getBPackageManager().getApplicationInfo(packageName, flags, BlackBoxCore.getUserId());
+            if (applicationInfo != null) {
+                return applicationInfo;
+            }
+            if (AppSystemEnv.isOpenPackage(packageName)) {
+                if (args.length >= 3 && args[2] instanceof Integer) {
+                    args[2] = BlackBoxCore.getHostUserId();
+                }
+                try {
+                    return method.invoke(who, args);
+                } catch (Throwable t) {
+                    return null;
+                }
+            }
+            return null;''')
+
 
 am_proxy=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IActivityManagerProxy.java'
 t=am_proxy.read_text(encoding='utf-8')
 t=t.replace('private static boolean isAudioPermission',bt_helper+'\n    private static boolean isAudioPermission')
 t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "ActivityManager checkPermission: Granting audio permission: " + permission);\n                return PackageManager.PERMISSION_GRANTED;\n            }',
             'if (isAudioPermission(permission) || isBluetoothPermission(permission)) {\n                Slog.d(TAG, "ActivityManager checkPermission: Granting permission: " + permission);\n                return PackageManager.PERMISSION_GRANTED;\n            }')
-needle_bind='public static Object BindServiceCommon(Object who, Method method, Object[] args,int callingPackageIndex) throws Throwable {\n        try {'
-replace_bind=needle_bind+'''
-            if (callingPackageIndex >= 0 && args != null && callingPackageIndex < args.length && args[callingPackageIndex] instanceof String) {
-                args[callingPackageIndex] = BlackBoxCore.getHostPkg();
-            }'''
-assert t.count(needle_bind)==1
-t=t.replace(needle_bind,replace_bind)
+
+cp_old='''                if (BuildCompat.isQ()) {
+                    args[1] = BlackBoxCore.getHostPkg();
+                }
+
+                if (auth.equals("settings")
+                        || auth.equals("media")
+                        || auth.equals("telephony")
+                        || ((String) auth).contains("com.google.android.gms")
+                        || ((String) auth).contains("com.android.vending")
+                        || ((String) auth).contains("com.google.android.gsf")
+                        || auth.equals("com.google.android.gms.chimera")
+                        || auth.equals("com.huawei.android.launcher.settings")
+                        || auth.equals("com.hihonor.android.launcher.settings")) {
+                    content = method.invoke(who, args);
+                    ContentProviderDelegate.update(content, (String) auth);
+                    return content;
+                } else {
+                    
+
+                    ProviderInfo providerInfo = BlackBoxCore.getBPackageManager()
+                            .resolveContentProvider(
+                                    (String) auth, GET_META_DATA, BActivityThread.getUserId());
+                    if (providerInfo == null) {
+                        
+                        return null;
+                    }'''
+cp_new='''                if (BuildCompat.isQ()) {
+                    args[1] = BlackBoxCore.getHostPkg();
+                }
+                int userIdx = getUserIndex();
+                if (userIdx >= 0 && userIdx < args.length) {
+                    args[userIdx] = BlackBoxCore.getHostUserId();
+                }
+
+                if (auth.equals("settings")
+                        || auth.equals("media")
+                        || auth.equals("telephony")
+                        || ((String) auth).contains("com.google.android.gms")
+                        || ((String) auth).contains("com.android.vending")
+                        || ((String) auth).contains("com.google.android.gsf")
+                        || auth.equals("com.google.android.gms.chimera")
+                        || auth.equals("com.huawei.android.launcher.settings")
+                        || auth.equals("com.hihonor.android.launcher.settings")) {
+                    try {
+                        content = method.invoke(who, args);
+                        ContentProviderDelegate.update(content, (String) auth);
+                        return content;
+                    } catch (Throwable t) {
+                        Slog.w(TAG, "GetContentProvider: system provider " + auth + " failed: " + t.getMessage());
+                        return null;
+                    }
+                } else {
+                    ProviderInfo providerInfo = BlackBoxCore.getBPackageManager()
+                            .resolveContentProvider(
+                                    (String) auth, GET_META_DATA, BActivityThread.getUserId());
+                    if (providerInfo == null) {
+                        try {
+                            content = method.invoke(who, args);
+                            ContentProviderDelegate.update(content, (String) auth);
+                            return content;
+                        } catch (Throwable t) {
+                            return null;
+                        }
+                    }'''
+assert t.count(cp_old)==1
+t=t.replace(cp_old,cp_new)
 am_proxy.write_text(t,encoding='utf-8')
+
+replace_method(am_proxy,'public static Object BindServiceCommon(', '''        if (args == null) return 0;
+        try {
+            if (callingPackageIndex >= 0 && callingPackageIndex < args.length && args[callingPackageIndex] instanceof String) {
+                args[callingPackageIndex] = BlackBoxCore.getHostPkg();
+            }
+            for (int i = 5; i < args.length; i++) {
+                if (args[i] instanceof Integer) {
+                    int val = (Integer) args[i];
+                    if (val == BActivityThread.getUserId() || val == BlackBoxCore.getUserId() || val >= 10) {
+                        args[i] = BlackBoxCore.getHostUserId();
+                    }
+                }
+            }
+
+            Intent intent = args.length > 2 && args[2] instanceof Intent ? (Intent) args[2] : null;
+            if (intent == null) {
+                try {
+                    return method.invoke(who, args);
+                } catch (Throwable t) {
+                    return 0;
+                }
+            }
+
+            String resolvedType = args.length > 3 && args[3] instanceof String ? (String) args[3] : null;
+            IServiceConnection connection = args.length > 4 && args[4] instanceof IServiceConnection ? (IServiceConnection) args[4] : null;
+
+            int userId = intent.getIntExtra("_B_|_UserId", -1);
+            userId = userId == -1 ? BActivityThread.getUserId() : userId;
+            ResolveInfo resolveInfo = BlackBoxCore.getBPackageManager().resolveService(intent, 0, resolvedType, userId);
+
+            boolean isOpen = AppSystemEnv.isOpenPackage(intent.getComponent())
+                    || (intent.getPackage() != null && AppSystemEnv.isOpenPackage(intent.getPackage()));
+
+            if (resolveInfo != null || isOpen) {
+                Intent proxyIntent = BlackBoxCore.getBActivityManager().bindService(intent,
+                        connection == null ? null : connection.asBinder(),
+                        resolvedType,
+                        userId);
+                if (connection != null) {
+                    if (intent.getComponent() == null && resolveInfo != null) {
+                        intent.setComponent(new ComponentName(resolveInfo.serviceInfo.packageName, resolveInfo.serviceInfo.name));
+                    }
+                    IServiceConnection proxy = ServiceConnectionDelegate.createProxy(connection, intent);
+                    args[4] = proxy;
+
+                    WeakReference<?> weakReference = BRLoadedApkServiceDispatcherInnerConnection.get(connection).mDispatcher();
+                    if (weakReference != null) {
+                        BRLoadedApkServiceDispatcher.get(weakReference.get())._set_mConnection(proxy);
+                    }
+                }
+
+                if (proxyIntent != null && proxyIntent.getComponent() != null &&
+                        proxyIntent.getComponent().getPackageName().equals(BlackBoxCore.getHostPkg())) {
+                    int flagsIndex = getFlagsIndex(args);
+                    if (flagsIndex >= 0) {
+                        int flags = MethodParameterUtils.toInt(args[flagsIndex]);
+                        flags &= ~Context.BIND_EXTERNAL_SERVICE;
+                        args[flagsIndex] = flags;
+                    }
+                }
+                if (callingPackageIndex >= 0 && callingPackageIndex < args.length) {
+                    args[callingPackageIndex] = BlackBoxCore.getHostPkg();
+                }
+
+                if (proxyIntent != null) {
+                    args[2] = proxyIntent;
+                    try {
+                        return method.invoke(who, args);
+                    } catch (Throwable t) {
+                        Slog.w(TAG, "BindServiceCommon: invoke proxyIntent failed: " + t.getMessage());
+                        return 0;
+                    }
+                }
+            }
+            try {
+                return method.invoke(who, args);
+            } catch (Throwable t) {
+                Slog.w(TAG, "BindServiceCommon: invoke original failed: " + t.getMessage());
+                return 0;
+            }
+        } catch (Throwable e) {
+            Slog.e(TAG, "BindServiceCommon: Unexpected error", e);
+            return 0;
+        }''')
+
+replace_hook(am_proxy, 'StartService', '''            Intent intent = (Intent) args[1];
+            String resolvedType = (String) args[2];
+            ResolveInfo resolveInfo = BlackBoxCore.getBPackageManager().resolveService(intent, 0, resolvedType, BActivityThread.getUserId());
+            if (resolveInfo == null) {
+                com.tegufy.blackbox.utils.MethodParameterUtils.replaceFirstAppPkg(args);
+                for (int i = 0; i < args.length; i++) {
+                    if (args[i] instanceof Integer && ((Integer) args[i] == BActivityThread.getUserId() || (Integer) args[i] == BlackBoxCore.getUserId() || (Integer) args[i] >= 10)) {
+                        args[i] = BlackBoxCore.getHostUserId();
+                    }
+                }
+                try {
+                    return method.invoke(who, args);
+                } catch (Throwable t) {
+                    Slog.w(TAG, "startService host delegate failed: " + t.getMessage());
+                    return null;
+                }
+            }
+
+            int requireForegroundIndex = getRequireForeground();
+            boolean requireForeground = false;
+            if (requireForegroundIndex != -1) {
+                requireForeground = (boolean) args[requireForegroundIndex];
+            }
+            return BlackBoxCore.getBActivityManager().startService(intent, resolvedType, requireForeground, BActivityThread.getUserId());''')
+
+replace_hook(am_proxy, 'RegisterReceiverWithFeature', '''            MethodParameterUtils.replaceFirstAppPkg(args);
+            int receiverIndex = getReceiverIndex();
+            if (args[receiverIndex] != null) {
+                IIntentReceiver intentReceiver = (IIntentReceiver) args[receiverIndex];
+                IIntentReceiver proxy = InnerReceiverDelegate.createProxy(intentReceiver);
+
+                WeakReference<?> weakReference = BRLoadedApkReceiverDispatcherInnerReceiver.get(intentReceiver).mDispatcher();
+                if (weakReference != null) {
+                    BRLoadedApkReceiverDispatcher.get(weakReference.get())._set_mIIntentReceiver(proxy);
+                }
+
+                args[receiverIndex] = proxy;
+            }
+            
+            if (args[getPermissionIndex()] != null) {
+                args[getPermissionIndex()] = null;
+            }
+
+            boolean isSystemFilter = false;
+            for (Object arg : args) {
+                if (arg instanceof android.content.IntentFilter) {
+                    android.content.IntentFilter f = (android.content.IntentFilter) arg;
+                    for (int a = 0; a < f.countActions(); a++) {
+                        String act = f.getAction(a);
+                        if (act != null && (act.startsWith("android.bluetooth.") ||
+                                            act.startsWith("android.intent.action.") ||
+                                            act.startsWith("android.net.") ||
+                                            act.startsWith("android.hardware."))) {
+                            isSystemFilter = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (BuildCompat.isU()) {
+                int flagsIndex = args.length - 1;
+                if (flagsIndex >= 0 && args[flagsIndex] instanceof Integer) {
+                    int flags = (int) args[flagsIndex];
+                    if (isSystemFilter) {
+                        flags = (flags & ~2) | 4;
+                    } else if ((flags & 2) == 0 && (flags & 4) == 0) {
+                        flags |= 2;
+                    }
+                    args[flagsIndex] = flags;
+                }
+            }
+
+            for (int i = 0; i < args.length; i++) {
+                if (args[i] instanceof Integer) {
+                    int val = (Integer) args[i];
+                    if (val == BActivityThread.getUserId() || val == BlackBoxCore.getUserId() || (val >= 10 && i < args.length - 1)) {
+                        args[i] = BlackBoxCore.getHostUserId();
+                    }
+                }
+            }
+
+            try {
+                return method.invoke(who, args);
+            } catch (Throwable t) {
+                Slog.w(TAG, "registerReceiverWithFeature threw: " + t.getMessage());
+                return null;
+            }''')
+
+replace_hook(am_proxy, 'RegisterReceiver', '''            MethodParameterUtils.replaceFirstAppPkg(args);
+            int receiverIndex = 2;
+            if (args[receiverIndex] != null) {
+                IIntentReceiver intentReceiver = (IIntentReceiver) args[receiverIndex];
+                IIntentReceiver proxy = InnerReceiverDelegate.createProxy(intentReceiver);
+
+                WeakReference<?> weakReference = BRLoadedApkReceiverDispatcherInnerReceiver.get(intentReceiver).mDispatcher();
+                if (weakReference != null) {
+                    BRLoadedApkReceiverDispatcher.get(weakReference.get())._set_mIIntentReceiver(proxy);
+                }
+
+                args[receiverIndex] = proxy;
+            }
+            int permissionIndex = 4;
+            if (permissionIndex < args.length && args[permissionIndex] != null) {
+                args[permissionIndex] = null;
+            }
+
+            for (int i = 0; i < args.length; i++) {
+                if (args[i] instanceof Integer) {
+                    int val = (Integer) args[i];
+                    if (val == BActivityThread.getUserId() || val == BlackBoxCore.getUserId() || (val >= 10 && i < args.length - 1)) {
+                        args[i] = BlackBoxCore.getHostUserId();
+                    }
+                }
+            }
+
+            try {
+                return method.invoke(who, args);
+            } catch (Throwable t) {
+                Slog.w(TAG, "registerReceiver threw: " + t.getMessage());
+                return null;
+            }''')
+
 
 perm_proxy=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IPermissionManagerProxy.java'
 t=perm_proxy.read_text(encoding='utf-8')
@@ -418,6 +817,8 @@ allowed_helper='''
     private static boolean isAllowedPermission(String permission) {
         if (permission == null) return false;
         return permission.startsWith("android.permission.BLUETOOTH")
+                || permission.equals(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                || permission.equals(android.Manifest.permission.ACCESS_COARSE_LOCATION)
                 || permission.equals(android.Manifest.permission.RECORD_AUDIO)
                 || permission.equals(android.Manifest.permission.MODIFY_AUDIO_SETTINGS)
                 || permission.equals(android.Manifest.permission.CAMERA)
@@ -489,9 +890,212 @@ needle_perm='if (dataString != null && dataString.equals("package:" + BActivityT
 replace_perm=needle_perm+'''
             if ("android.content.pm.action.REQUEST_PERMISSIONS".equals(intent.getAction())) {
                 intent.putExtra("android.content.pm.extra.REQUEST_PERMISSIONS_PACKAGE_NAME", BlackBoxCore.getHostPkg());
+            }
+            if ("com.google.android.gms.availability.ACTION_RESOLVE_ERROR".equals(intent.getAction())) {
+                Slog.d(TAG, "Blocked GMS ACTION_RESOLVE_ERROR");
+                return 0;
+            }
+            ComponentName gmsComp = intent.getComponent();
+            if (gmsComp != null && "com.google.android.gms".equals(gmsComp.getPackageName()) && gmsComp.getClassName().contains("Error")) {
+                Slog.d(TAG, "Blocked GMS error dialog: " + gmsComp.getClassName());
+                return 0;
             }'''
 assert t.count(needle_perm)==1
 act_common.write_text(t.replace(needle_perm,replace_perm),encoding='utf-8')
+
+notif_proxy=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/INotificationManagerProxy.java'
+t=notif_proxy.read_text(encoding='utf-8')
+notif_enqueue_old='''            String tag = (String) args[getTagIndex()];
+            int id = (int) args[getIdIndex()];
+            Notification notification = MethodParameterUtils.getFirstParam(args, Notification.class);
+            BNotificationManager.get().enqueueNotificationWithTag(id, tag, notification);
+            return 0;'''
+notif_enqueue_new='''            String tag = (String) args[getTagIndex()];
+            int id = (int) args[getIdIndex()];
+            Notification notification = MethodParameterUtils.getFirstParam(args, Notification.class);
+            if (tag != null && (tag.contains("GoogleApiAvailability") || tag.contains("GmsError") || tag.contains("GooglePlayServices") || tag.contains("com.google.android.gms"))) {
+                return 0;
+            }
+            if (notification != null && notification.extras != null) {
+                CharSequence title = notification.extras.getCharSequence(Notification.EXTRA_TITLE);
+                CharSequence text = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
+                if ((title != null && (title.toString().contains("Google Play services") || title.toString().contains("Google Play Services")))
+                        || (text != null && (text.toString().contains("Google Play services") || text.toString().contains("Google Play Services")))) {
+                    return 0;
+                }
+            }
+            BNotificationManager.get().enqueueNotificationWithTag(id, tag, notification);
+            return 0;'''
+assert t.count(notif_enqueue_old)==1
+notif_proxy.write_text(t.replace(notif_enqueue_old,notif_enqueue_new),encoding='utf-8')
+
+crash_handler_code='''package com.tegufy.blackbox.core;
+
+import com.tegufy.blackbox.BlackBoxCore;
+
+public class CrashHandler implements Thread.UncaughtExceptionHandler {
+    private Thread.UncaughtExceptionHandler mDefaultHandler;
+
+    public static void create() {
+        new CrashHandler();
+    }
+
+    public CrashHandler() {
+        mDefaultHandler = Thread.getDefaultUncaughtExceptionHandler();
+        Thread.setDefaultUncaughtExceptionHandler(this);
+    }
+
+    private static boolean isGooglePlayServicesCrash(Throwable throwable) {
+        if (throwable == null) return false;
+        Throwable curr = throwable;
+        while (curr != null) {
+            String msg = curr.getMessage();
+            if (msg != null) {
+                String lower = msg.toLowerCase(java.util.Locale.ROOT);
+                if (lower.contains("google play services") ||
+                    lower.contains("googleplayservices") ||
+                    lower.contains("googleapiavailability") ||
+                    lower.contains("chimera") ||
+                    lower.contains("dynamitemodule") ||
+                    lower.contains("firebase") ||
+                    lower.contains("com.google.android.gms")) {
+                    return true;
+                }
+            }
+            for (StackTraceElement elem : curr.getStackTrace()) {
+                String cls = elem.getClassName();
+                if (cls.contains("com.google.android.gms") ||
+                    cls.contains("GoogleApiAvailability") ||
+                    cls.contains("GooglePlayServicesUtil") ||
+                    cls.contains("com.google.firebase")) {
+                    return true;
+                }
+            }
+            curr = curr.getCause();
+        }
+        return false;
+    }
+
+    @Override
+    public void uncaughtException(Thread t, Throwable e) {
+        if (isGooglePlayServicesCrash(e)) {
+            android.util.Log.w("CrashHandler", "Suppressed uncaught Google Play Services crash on thread " + t.getName(), e);
+            return;
+        }
+        if (BlackBoxCore.get().getExceptionHandler() != null) {
+            BlackBoxCore.get().getExceptionHandler().uncaughtException(t, e);
+        }
+        if (mDefaultHandler != null) {
+            mDefaultHandler.uncaughtException(t, e);
+        }
+    }
+}
+'''
+write(Path('runtime/src/main/java/com/tegufy/blackbox/core/CrashHandler.java'),crash_handler_code)
+
+gms_proxy_code='''package com.tegufy.blackbox.fake.service;
+
+import android.content.Context;
+import java.lang.reflect.Method;
+import com.tegufy.blackbox.BlackBoxCore;
+import com.tegufy.blackbox.fake.hook.ClassInvocationStub;
+import com.tegufy.blackbox.fake.hook.MethodHook;
+import com.tegufy.blackbox.fake.hook.ProxyMethod;
+import com.tegufy.blackbox.utils.Slog;
+
+/**
+ * Proxy for Google Play Services availability checks.
+ * Ensures guest applications (e.g. WhatsApp) see GMS as available and never show error dialogs.
+ */
+public class GooglePlayServicesProxy extends ClassInvocationStub {
+    public static final String TAG = "GooglePlayServicesProxy";
+    private static final int SUCCESS = 0;
+
+    public GooglePlayServicesProxy() {
+        super();
+        onlyProxy(true);
+    }
+
+    @Override
+    protected Object getWho() {
+        return null;
+    }
+
+    @Override
+    protected void inject(Object baseInvocation, Object proxyInvocation) {
+    }
+
+    @Override
+    public boolean isBadEnv() {
+        return false;
+    }
+
+    @ProxyMethod("isGooglePlayServicesAvailable")
+    public static class IsGooglePlayServicesAvailable extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return SUCCESS;
+        }
+    }
+
+    @ProxyMethod("getErrorString")
+    public static class GetErrorString extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return null;
+        }
+    }
+
+    @ProxyMethod("isUserRecoverableError")
+    public static class IsUserRecoverableError extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return false;
+        }
+    }
+
+    @ProxyMethod("getErrorResolutionIntent")
+    public static class GetErrorResolutionIntent extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return null;
+        }
+    }
+
+    @ProxyMethod("showErrorNotification")
+    public static class ShowErrorNotification extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return null;
+        }
+    }
+
+    @ProxyMethod("showErrorDialogFragment")
+    public static class ShowErrorDialogFragment extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return false;
+        }
+    }
+
+    @ProxyMethod("getApkVersion")
+    public static class GetApkVersion extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return 240812000;
+        }
+    }
+
+    @ProxyMethod("getClientVersion")
+    public static class GetClientVersion extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return 240812000;
+        }
+    }
+}
+'''
+write(Path('runtime/src/main/java/com/tegufy/blackbox/fake/service/GooglePlayServicesProxy.java'),gms_proxy_code)
 
 bt_mgr_code='''package com.tegufy.blackbox.fake.service;
 
@@ -503,7 +1107,10 @@ import java.lang.reflect.Field;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import black.android.os.BRServiceManager;
 import com.tegufy.blackbox.BlackBoxCore;
@@ -547,6 +1154,19 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
         return false;
     }
 
+    public static Field findField(Class<?> clazz, String name) {
+        Class<?> curr = clazz;
+        while (curr != null && curr != Object.class) {
+            try {
+                Field f = curr.getDeclaredField(name);
+                f.setAccessible(true);
+                return f;
+            } catch (Throwable ignored) {}
+            curr = curr.getSuperclass();
+        }
+        return null;
+    }
+
     public static void sanitizeBluetoothArgs(Object[] args) {
         if (args == null) return;
         for (int i = 0; i < args.length; i++) {
@@ -562,11 +1182,6 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
                 if ((guestPkg != null && guestPkg.equals(str)) || BlackBoxCore.get().isInstalled(str, BlackBoxCore.getUserId())) {
                     args[i] = BlackBoxCore.getHostPkg();
                 }
-            } else if (arg instanceof Integer) {
-                int uid = (Integer) arg;
-                if (uid == BlackBoxCore.getBUid()) {
-                    args[i] = BlackBoxCore.getHostUid();
-                }
             }
         }
     }
@@ -574,52 +1189,105 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
     public static void fixAttributionSource(Object attributionSource) {
         if (attributionSource == null) return;
         try {
-            Field stateField = attributionSource.getClass().getDeclaredField("mAttributionSourceState");
-            stateField.setAccessible(true);
-            Object state = stateField.get(attributionSource);
-            if (state != null) {
-                fixAttributionSourceState(state);
+            Field stateField = findField(attributionSource.getClass(), "mAttributionSourceState");
+            if (stateField != null) {
+                Object state = stateField.get(attributionSource);
+                if (state != null) {
+                    fixAttributionSourceState(state);
+                }
             }
-        } catch (Throwable t) {
-            try {
-                Field pkgField = attributionSource.getClass().getDeclaredField("mPackageName");
-                pkgField.setAccessible(true);
-                pkgField.set(attributionSource, BlackBoxCore.getHostPkg());
-            } catch (Throwable ignored) {}
-            try {
-                Field uidField = attributionSource.getClass().getDeclaredField("mUid");
-                uidField.setAccessible(true);
-                uidField.set(attributionSource, BlackBoxCore.getHostUid());
-            } catch (Throwable ignored) {}
-        }
+        } catch (Throwable ignored) {}
+        try {
+            Field pkgField = findField(attributionSource.getClass(), "mPackageName");
+            if (pkgField != null) pkgField.set(attributionSource, BlackBoxCore.getHostPkg());
+        } catch (Throwable ignored) {}
+        try {
+            Field uidField = findField(attributionSource.getClass(), "mUid");
+            if (uidField != null) uidField.set(attributionSource, BlackBoxCore.getHostUid());
+        } catch (Throwable ignored) {}
     }
 
     public static void fixAttributionSourceState(Object state) {
         if (state == null) return;
         try {
             Class<?> stateClass = state.getClass();
-            try {
-                Field uidField = stateClass.getField("uid");
-                uidField.setInt(state, BlackBoxCore.getHostUid());
-            } catch (Throwable ignored) {}
+            Field uidField = findField(stateClass, "uid");
+            if (uidField != null) {
+                try { uidField.setInt(state, BlackBoxCore.getHostUid()); } catch (Throwable ignored) {}
+            }
 
-            try {
-                Field pkgField = stateClass.getField("packageName");
-                pkgField.set(state, BlackBoxCore.getHostPkg());
-            } catch (Throwable ignored) {}
+            Field pkgField = findField(stateClass, "packageName");
+            if (pkgField != null) {
+                try { pkgField.set(state, BlackBoxCore.getHostPkg()); } catch (Throwable ignored) {}
+            }
 
-            try {
-                Field nextField = stateClass.getField("next");
-                Object nextArray = nextField.get(state);
-                if (nextArray instanceof Object[]) {
-                    for (Object nextState : (Object[]) nextArray) {
-                        fixAttributionSourceState(nextState);
+            Field pidField = findField(stateClass, "pid");
+            if (pidField != null) {
+                try { pidField.setInt(state, android.os.Process.myPid()); } catch (Throwable ignored) {}
+            }
+
+            Field deviceIdField = findField(stateClass, "deviceId");
+            if (deviceIdField != null) {
+                try { deviceIdField.setInt(state, 0); } catch (Throwable ignored) {}
+            }
+
+            Field nextField = findField(stateClass, "next");
+            if (nextField != null) {
+                try {
+                    Object nextArray = nextField.get(state);
+                    if (nextArray instanceof Object[]) {
+                        for (Object nextState : (Object[]) nextArray) {
+                            fixAttributionSourceState(nextState);
+                        }
                     }
-                }
-            } catch (Throwable ignored) {}
+                } catch (Throwable ignored) {}
+            }
         } catch (Throwable t) {
             Slog.w(TAG, "Failed to fix AttributionSourceState: " + t.getMessage());
         }
+    }
+
+    public static IBinder createBluetoothBinderProxy(final IBinder rawBinder) {
+        if (rawBinder == null) return null;
+        if (Proxy.isProxyClass(rawBinder.getClass())) {
+            return rawBinder;
+        }
+        return (IBinder) Proxy.newProxyInstance(rawBinder.getClass().getClassLoader(), new Class<?>[]{IBinder.class}, new InvocationHandler() {
+            private Object mIBluetoothProxyInstance = null;
+
+            @Override
+            public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+                String name = method.getName();
+                if ("queryLocalInterface".equals(name) && args != null && args.length == 1) {
+                    String descriptor = (String) args[0];
+                    if ("android.bluetooth.IBluetooth".equals(descriptor)) {
+                        if (mIBluetoothProxyInstance == null) {
+                            try {
+                                Class<?> stubClass = Class.forName("android.bluetooth.IBluetooth$Stub");
+                                Method asInterfaceMethod = stubClass.getMethod("asInterface", IBinder.class);
+                                Object realIface = asInterfaceMethod.invoke(null, rawBinder);
+                                mIBluetoothProxyInstance = createBluetoothProxy(realIface);
+                            } catch (Throwable t) {
+                                Slog.w(TAG, "Failed to create IBluetooth proxy from binder: " + t.getMessage());
+                            }
+                        }
+                        if (mIBluetoothProxyInstance != null) {
+                            return mIBluetoothProxyInstance;
+                        }
+                    }
+                }
+                if ("equals".equals(name) && args != null && args.length == 1) {
+                    return proxy == args[0] || rawBinder.equals(args[0]);
+                }
+                if ("hashCode".equals(name) && (args == null || args.length == 0)) {
+                    return rawBinder.hashCode();
+                }
+                if ("toString".equals(name) && (args == null || args.length == 0)) {
+                    return "IBluetoothBinderProxy$" + rawBinder.toString();
+                }
+                return method.invoke(rawBinder, args);
+            }
+        });
     }
 
     public static Object createBluetoothProxy(final Object target) {
@@ -631,10 +1299,10 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
                 String name = method.getName();
                 if ("asBinder".equals(name)) {
                     if (target instanceof IInterface) {
-                        return ((IInterface) target).asBinder();
+                        return createBluetoothBinderProxy(((IInterface) target).asBinder());
                     }
                     if (target instanceof IBinder) {
-                        return target;
+                        return createBluetoothBinderProxy((IBinder) target);
                     }
                 }
                 if ("equals".equals(name) && args != null && args.length == 1) {
@@ -661,6 +1329,14 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
                         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
                         if (adapter != null) return adapter.getState();
                     }
+                    if ("getBondedDevices".equals(name) || "getConnectedDevices".equals(name)) {
+                        if (result == null) {
+                            Class<?> returnType = method.getReturnType();
+                            if (returnType.isArray()) return java.lang.reflect.Array.newInstance(returnType.getComponentType(), 0);
+                            if (Set.class.isAssignableFrom(returnType)) return Collections.emptySet();
+                            return Collections.emptyList();
+                        }
+                    }
                     return result;
                 } catch (Throwable t) {
                     Throwable cause = t.getCause() != null ? t.getCause() : t;
@@ -673,13 +1349,21 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
                         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
                         return adapter != null ? adapter.getState() : BluetoothAdapter.STATE_OFF;
                     }
-                    if ("getBondedDevices".equals(name)) {
+                    if ("getBondedDevices".equals(name) || "getConnectedDevices".equals(name)) {
                         Class<?> returnType = method.getReturnType();
                         if (returnType.isArray()) {
                             return java.lang.reflect.Array.newInstance(returnType.getComponentType(), 0);
                         }
-                        return null;
+                        if (Set.class.isAssignableFrom(returnType)) {
+                            return Collections.emptySet();
+                        }
+                        return Collections.emptyList();
                     }
+                    if ("isDiscovering".equals(name)) return Boolean.FALSE;
+                    if ("startDiscovery".equals(name)) return Boolean.FALSE;
+                    if ("cancelDiscovery".equals(name)) return Boolean.TRUE;
+                    if ("getAddress".equals(name)) return "02:00:00:00:00:00";
+                    if ("getName".equals(name)) return "Bluetooth";
                     Class<?> returnType = method.getReturnType();
                     if (returnType == boolean.class || returnType == Boolean.class) return Boolean.FALSE;
                     if (returnType == int.class || returnType == Integer.class) return 0;
@@ -724,6 +1408,9 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
                     Class<?> returnType = method.getReturnType();
                     if (returnType == boolean.class || returnType == Boolean.class) return Boolean.FALSE;
                     if (returnType == int.class || returnType == Integer.class) return 0;
+                    if (returnType.isArray()) return java.lang.reflect.Array.newInstance(returnType.getComponentType(), 0);
+                    if (List.class.isAssignableFrom(returnType)) return Collections.emptyList();
+                    if (Set.class.isAssignableFrom(returnType)) return Collections.emptySet();
                     return null;
                 }
             }
@@ -758,6 +1445,19 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
     public static class RegisterAdapter extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            if (args != null && args.length > 0 && args[0] != null) {
+                final Object origCallback = args[0];
+                Class<?>[] ifaces = MethodParameterUtils.getAllInterface(origCallback.getClass());
+                args[0] = Proxy.newProxyInstance(origCallback.getClass().getClassLoader(), ifaces, new InvocationHandler() {
+                    @Override
+                    public Object invoke(Object proxy, Method m, Object[] mArgs) throws Throwable {
+                        if ("onBluetoothServiceUp".equals(m.getName()) && mArgs != null && mArgs.length > 0 && mArgs[0] instanceof IBinder) {
+                            mArgs[0] = createBluetoothBinderProxy((IBinder) mArgs[0]);
+                        }
+                        return m.invoke(origCallback, mArgs);
+                    }
+                });
+            }
             sanitizeBluetoothArgs(args);
             Object result = null;
             try {
@@ -766,16 +1466,7 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
                 Slog.w(TAG, "registerAdapter threw: " + t.getMessage());
             }
             if (result != null) {
-                Object proxied = createBluetoothProxy(result);
-                try {
-                    if (proxied instanceof IBinder) {
-                        Map<String, IBinder> cache = BRServiceManager.get().sCache();
-                        if (cache != null) {
-                            cache.put("bluetooth", (IBinder) proxied);
-                        }
-                    }
-                } catch (Throwable ignored) {}
-                return proxied;
+                return createBluetoothProxy(result);
             }
             return null;
         }
@@ -908,6 +1599,8 @@ import android.bluetooth.BluetoothAdapter;
 import android.os.IBinder;
 
 import java.lang.reflect.Method;
+import java.util.Collections;
+import java.util.Set;
 
 import black.android.os.BRServiceManager;
 import com.tegufy.blackbox.fake.hook.BinderInvocationStub;
@@ -952,7 +1645,14 @@ public class IBluetoothProxy extends BinderInvocationStub {
     public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
         IBluetoothManagerProxy.sanitizeBluetoothArgs(args);
         try {
-            return super.invoke(proxy, method, args);
+            Object result = super.invoke(proxy, method, args);
+            if (("getBondedDevices".equals(method.getName()) || "getConnectedDevices".equals(method.getName())) && result == null) {
+                Class<?> returnType = method.getReturnType();
+                if (returnType.isArray()) return java.lang.reflect.Array.newInstance(returnType.getComponentType(), 0);
+                if (Set.class.isAssignableFrom(returnType)) return Collections.emptySet();
+                return Collections.emptyList();
+            }
+            return result;
         } catch (Throwable t) {
             Throwable cause = t.getCause() != null ? t.getCause() : t;
             String name = method.getName();
@@ -965,6 +1665,21 @@ public class IBluetoothProxy extends BinderInvocationStub {
                 BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
                 return adapter != null ? adapter.getState() : BluetoothAdapter.STATE_OFF;
             }
+            if ("getBondedDevices".equals(name) || "getConnectedDevices".equals(name)) {
+                Class<?> returnType = method.getReturnType();
+                if (returnType.isArray()) {
+                    return java.lang.reflect.Array.newInstance(returnType.getComponentType(), 0);
+                }
+                if (Set.class.isAssignableFrom(returnType)) {
+                    return Collections.emptySet();
+                }
+                return Collections.emptyList();
+            }
+            if ("isDiscovering".equals(name)) return Boolean.FALSE;
+            if ("startDiscovery".equals(name)) return Boolean.FALSE;
+            if ("cancelDiscovery".equals(name)) return Boolean.TRUE;
+            if ("getAddress".equals(name)) return "02:00:00:00:00:00";
+            if ("getName".equals(name)) return "Bluetooth";
             Class<?> returnType = method.getReturnType();
             if (returnType == boolean.class || returnType == Boolean.class) return Boolean.FALSE;
             if (returnType == int.class || returnType == Integer.class) return 0;
@@ -1020,9 +1735,10 @@ write(Path('runtime/src/main/java/com/tegufy/blackbox/fake/service/IBluetoothPro
 hook_mgr=P/'runtime/src/main/java/com/tegufy/blackbox/fake/hook/HookManager.java'
 t=hook_mgr.read_text(encoding='utf-8')
 t=t.replace('import com.tegufy.blackbox.fake.service.IAudioServiceProxy;',
-            'import com.tegufy.blackbox.fake.service.IAudioServiceProxy;\nimport com.tegufy.blackbox.fake.service.IBluetoothManagerProxy;\nimport com.tegufy.blackbox.fake.service.IBluetoothProxy;')
+            'import com.tegufy.blackbox.fake.service.IAudioServiceProxy;\nimport com.tegufy.blackbox.fake.service.IBluetoothManagerProxy;\nimport com.tegufy.blackbox.fake.service.IBluetoothProxy;\nimport com.tegufy.blackbox.fake.service.GooglePlayServicesProxy;')
+t=t.replace('addInjector(new GooglePlayServicesProxy());', '// GooglePlayServicesProxy moved to unconditional init')
 t=t.replace('addInjector(new IAudioServiceProxy());',
-            'addInjector(new IAudioServiceProxy());\n            addInjector(new IBluetoothManagerProxy());\n            addInjector(new IBluetoothProxy());')
+            'addInjector(new IAudioServiceProxy());\n            addInjector(new GooglePlayServicesProxy());\n            addInjector(new IBluetoothManagerProxy());\n            addInjector(new IBluetoothProxy());')
 hook_mgr.write_text(t,encoding='utf-8')
 
 # Runtime licenses accompany the generated source and the experimental APK.

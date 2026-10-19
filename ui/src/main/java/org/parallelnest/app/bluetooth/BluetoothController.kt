@@ -5,6 +5,9 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanResult
+import android.bluetooth.le.ScanSettings
 import android.content.*
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -21,7 +24,7 @@ data class NearbyDevice(val address: String, val name: String, val bond: Int) {
 data class BluetoothState(val supported: Boolean = false, val permitted: Boolean = false, val scanPermitted: Boolean = false, val enabled: Boolean = false,
                           val turningOn: Boolean = false, val scanning: Boolean = false, val devices: List<NearbyDevice> = emptyList(), val message: String? = null)
 
-/** Foreground, user-requested classic discovery. No service, polling, persistence or device uploads. */
+/** Foreground, user-requested discovery (classic inquiry and BLE scan). No service, polling, persistence or device uploads. */
 class BluetoothController(private val context: Context) {
     private val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
     private val mutable = MutableStateFlow(BluetoothState(supported=adapter!=null))
@@ -29,9 +32,39 @@ class BluetoothController(private val context: Context) {
     private val found = linkedMapOf<String,NearbyDevice>()
     private var registered = false
     private var ownsDiscovery = false
+    private var bleScanning = false
     private val scope = CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
     private var deadline: Job? = null
     private var pollingJob: Job? = null
+
+    private val bleCallback = object : ScanCallback() {
+        override fun onScanResult(callbackType: Int, result: ScanResult?) {
+            if (!ownsDiscovery) return
+            result?.device?.let { device ->
+                val name = result.scanRecord?.deviceName ?: runCatching { device.name }.getOrNull() ?: "BLE device"
+                val address = device.address ?: return
+                if (found.size < 64 || found.containsKey(address)) {
+                    val current = found[address]
+                    val finalName = if (current != null && current.name != "BLE device" && current.name != "Unnamed device") {
+                        current.name
+                    } else if (name != "BLE device" && name != "Unnamed device") {
+                        name
+                    } else current?.name ?: name
+                    val bond = runCatching { device.bondState }.getOrDefault(BluetoothDevice.BOND_NONE)
+                    found[address] = NearbyDevice(address, finalName.take(120), bond)
+                    refresh()
+                }
+            }
+        }
+
+        override fun onBatchScanResults(results: MutableList<ScanResult>?) {
+            results?.forEach { onScanResult(0, it) }
+        }
+
+        override fun onScanFailed(errorCode: Int) {
+            // BLE scan failed
+        }
+    }
 
     fun hasPermission(): Boolean {
         if (adapter == null) return false
@@ -59,16 +92,33 @@ class BluetoothController(private val context: Context) {
             when(intent.action) {
                 BluetoothDevice.ACTION_FOUND -> if(ownsDiscovery && hasPermission()) {
                     runCatching {
-                        intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE,BluetoothDevice::class.java)?.let { device ->
-                            if(found.size<64 || found.containsKey(device.address)) found[device.address]=entry(device)
+                        val device = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
+                        }
+                        val extraName = intent.getStringExtra(BluetoothDevice.EXTRA_NAME)
+                        device?.let { dev ->
+                            val current = found[dev.address]
+                            val rawName = runCatching { dev.name }.getOrNull() ?: extraName
+                            val finalName = if (current != null && current.name != "BLE device" && current.name != "Unnamed device") {
+                                current.name
+                            } else rawName ?: current?.name ?: "Unnamed device"
+                            if(found.size<64 || found.containsKey(dev.address)) {
+                                val bond = runCatching { dev.bondState }.getOrDefault(BluetoothDevice.BOND_NONE)
+                                found[dev.address] = NearbyDevice(dev.address, finalName.take(120), bond)
+                            }
                         }
                     }.onFailure { mutable.update { s -> s.copy(message="Device details unavailable; check Nearby devices permission") } }
                     refresh()
                 }
                 BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> if(ownsDiscovery) {
-                    ownsDiscovery=false;deadline?.cancel()
-                    mutable.update { it.copy(scanning=false,message="Scan finished. Only discoverable classic Bluetooth devices appear here.") }
-                    refresh()
+                    if (!bleScanning) {
+                        ownsDiscovery=false;deadline?.cancel()
+                        mutable.update { it.copy(scanning=false,message="Scan finished.") }
+                        refresh()
+                    }
                 }
                 BluetoothAdapter.ACTION_STATE_CHANGED -> {
                     val stateExtra = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
@@ -194,15 +244,48 @@ class BluetoothController(private val context: Context) {
     @SuppressLint("MissingPermission")
     fun scan() {
         if(!hasPermission() || !hasScanPermission()) { refresh();return }
+        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) {
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
+            val locationOn = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
+                lm?.isLocationEnabled == true
+            } else {
+                lm?.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) == true ||
+                    lm?.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER) == true
+            }
+            if (!locationOn) {
+                mutable.update { it.copy(scanning = false, message = "Turn on Location in device settings to discover Bluetooth devices on this Android version") }
+                return
+            }
+        }
         runCatching {
-            check(adapter?.isEnabled==true) { "Turn Bluetooth on before scanning" }
-            check(!adapter.isDiscovering) { "Another Bluetooth discovery is active; try again after it finishes" }
+            val nonNullAdapter = adapter ?: return
+            check(nonNullAdapter.isEnabled) { "Turn Bluetooth on before scanning" }
+            if (nonNullAdapter.isDiscovering) {
+                runCatching { nonNullAdapter.cancelDiscovery() }
+            }
+            if (bleScanning) {
+                runCatching { nonNullAdapter.bluetoothLeScanner?.stopScan(bleCallback) }
+                bleScanning = false
+            }
             found.clear();refresh()
-            check(adapter.startDiscovery()) { "Android could not start discovery. Try Bluetooth settings or another device." }
-            ownsDiscovery=true
-            mutable.update { it.copy(scanning=true,message="Scanning for discoverable classic Bluetooth devices…") }
+            val classicStarted = runCatching { nonNullAdapter.startDiscovery() }.getOrDefault(false)
+            val leScanner = runCatching { nonNullAdapter.bluetoothLeScanner }.getOrNull()
+            if (leScanner != null) {
+                runCatching {
+                    val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
+                    leScanner.startScan(null, settings, bleCallback)
+                    bleScanning = true
+                }
+            }
+            ownsDiscovery = classicStarted || bleScanning
+            check(ownsDiscovery) { "Android could not start discovery. Try Bluetooth settings or another device." }
+            mutable.update { it.copy(scanning=true,message="Scanning for nearby Bluetooth devices…") }
             deadline?.cancel()
-            deadline=scope.launch { delay(15_000); stopScan();mutable.update { it.copy(message="Scan finished. Make the other device discoverable and scan again if needed.") } }
+            deadline=scope.launch {
+                delay(15_000)
+                stopScan()
+                mutable.update { it.copy(message="Scan finished. Make the other device discoverable and scan again if needed.") }
+            }
         }.onFailure { mutable.update { s -> s.copy(message=it.message ?: "Discovery failed",scanning=false) } }
     }
 
@@ -210,7 +293,15 @@ class BluetoothController(private val context: Context) {
     fun stopScan() {
         deadline?.cancel();deadline=null
         val wasScanning=ownsDiscovery
-        if(ownsDiscovery && hasScanPermission()) runCatching { adapter?.cancelDiscovery() }
+        if(ownsDiscovery) {
+            if (hasScanPermission()) {
+                runCatching { adapter?.cancelDiscovery() }
+            }
+            if (bleScanning) {
+                runCatching { adapter?.bluetoothLeScanner?.stopScan(bleCallback) }
+                bleScanning = false
+            }
+        }
         ownsDiscovery=false
         mutable.update { it.copy(scanning=false,message=if(wasScanning) "Scan stopped" else it.message) }
     }
