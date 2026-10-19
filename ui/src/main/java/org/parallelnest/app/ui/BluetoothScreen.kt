@@ -17,6 +17,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.launch
 import org.parallelnest.app.bluetooth.BluetoothController
 
 @Composable fun BluetoothScreen(settings: () -> Unit, permissions: () -> Unit, shareFile: () -> Unit) {
@@ -25,10 +26,15 @@ import org.parallelnest.app.bluetooth.BluetoothController
     val controller=remember { BluetoothController(context.applicationContext) }
     val state by controller.state.collectAsStateWithLifecycle()
     var pendingScan by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val nearby=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         controller.refresh()
-        if(pendingScan && controller.hasScanPermission() && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))controller.scan()
-        pendingScan=false
+        scope.launch {
+            kotlinx.coroutines.delay(250)
+            controller.refresh()
+            if(pendingScan && controller.hasScanPermission() && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) controller.scan()
+            pendingScan=false
+        }
     }
     val enable=rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         controller.onEnableResult(result.resultCode == android.app.Activity.RESULT_OK)

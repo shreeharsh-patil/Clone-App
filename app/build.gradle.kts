@@ -16,8 +16,8 @@ android {
         applicationId = "org.parallelnest.app"
         minSdk = 33
         targetSdk = 36
-        versionCode = 11
-        versionName = "0.4.3"
+        versionCode = 12
+        versionName = "0.4.4"
         manifestPlaceholders["applicationLabel"] = "@string/app_name"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }

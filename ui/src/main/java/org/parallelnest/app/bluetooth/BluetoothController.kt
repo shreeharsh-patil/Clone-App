@@ -26,8 +26,9 @@ data class BluetoothState(val supported: Boolean = false, val permitted: Boolean
 
 /** Foreground, user-requested discovery (classic inquiry and BLE scan). No service, polling, persistence or device uploads. */
 class BluetoothController(private val context: Context) {
-    private val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
-    private val mutable = MutableStateFlow(BluetoothState(supported=adapter!=null))
+    private val adapter: BluetoothAdapter?
+        get() = context.getSystemService(BluetoothManager::class.java)?.adapter ?: BluetoothAdapter.getDefaultAdapter()
+    private val mutable = MutableStateFlow(BluetoothState(supported = (context.getSystemService(BluetoothManager::class.java)?.adapter ?: BluetoothAdapter.getDefaultAdapter()) != null))
     val state = mutable.asStateFlow()
     private val found = linkedMapOf<String,NearbyDevice>()
     private var registered = false
@@ -312,8 +313,9 @@ class BluetoothController(private val context: Context) {
         stopScan()
         runCatching {
             check(mutable.value.devices.any { it.address==address }) { "Device is no longer in this list; scan again" }
-            check(adapter?.isEnabled==true) { "Turn Bluetooth on first" }
-            val device=adapter.getRemoteDevice(address)
+            val nonNullAdapter = adapter ?: error("Bluetooth unavailable")
+            check(nonNullAdapter.isEnabled) { "Turn Bluetooth on first" }
+            val device=nonNullAdapter.getRemoteDevice(address)
             check(device.bondState==BluetoothDevice.BOND_NONE && device.createBond()) { "Android could not start pairing; use Bluetooth settings" }
             mutable.update { it.copy(message="Pairing requested. Confirm any Android pairing prompt on both devices.") }
             refresh()

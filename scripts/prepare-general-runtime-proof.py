@@ -1147,6 +1147,7 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
     @Override
     protected void inject(Object baseInvocation, Object proxyInvocation) {
         replaceSystemService("bluetooth_manager");
+        fixBluetoothAdapterAttributionSource();
     }
 
     @Override
@@ -1167,12 +1168,67 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
         return null;
     }
 
+    public static boolean isHostBluetoothEnabled() {
+        try {
+            android.bluetooth.BluetoothManager bm = (android.bluetooth.BluetoothManager) BlackBoxCore.getContext().getSystemService(android.content.Context.BLUETOOTH_SERVICE);
+            if (bm != null && bm.getAdapter() != null) {
+                return bm.getAdapter().isEnabled();
+            }
+        } catch (Throwable ignored) {}
+        try {
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            if (adapter != null) return adapter.isEnabled();
+        } catch (Throwable ignored) {}
+        return false;
+    }
+
+    public static int getHostBluetoothState() {
+        try {
+            android.bluetooth.BluetoothManager bm = (android.bluetooth.BluetoothManager) BlackBoxCore.getContext().getSystemService(android.content.Context.BLUETOOTH_SERVICE);
+            if (bm != null && bm.getAdapter() != null) {
+                int s = bm.getAdapter().getState();
+                if (s != BluetoothAdapter.STATE_OFF) return s;
+            }
+        } catch (Throwable ignored) {}
+        try {
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            if (adapter != null) return adapter.getState();
+        } catch (Throwable ignored) {}
+        return BluetoothAdapter.STATE_OFF;
+    }
+
+    public static void fixBluetoothAdapterAttributionSource() {
+        if (android.os.Build.VERSION.SDK_INT < 31) return;
+        try {
+            BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+            if (adapter != null) {
+                Field f = findField(BluetoothAdapter.class, "mAttributionSource");
+                if (f != null) {
+                    Object hostSource = BlackBoxCore.getContext().getAttributionSource();
+                    if (hostSource != null) {
+                        f.set(adapter, hostSource);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+    }
+
     public static void sanitizeBluetoothArgs(Object[] args) {
         if (args == null) return;
+        fixBluetoothAdapterAttributionSource();
         for (int i = 0; i < args.length; i++) {
             Object arg = args[i];
             if (arg == null) continue;
             if (arg.getClass().getName().equals("android.content.AttributionSource")) {
+                if (android.os.Build.VERSION.SDK_INT >= 31) {
+                    try {
+                        Object hostSource = BlackBoxCore.getContext().getAttributionSource();
+                        if (hostSource != null) {
+                            args[i] = hostSource;
+                            continue;
+                        }
+                    } catch (Throwable ignored) {}
+                }
                 fixAttributionSource(arg);
             } else if (arg instanceof Object[]) {
                 sanitizeBluetoothArgs((Object[]) arg);
@@ -1321,13 +1377,12 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
                     Object result = method.invoke(target, args);
                     if ("isEnabled".equals(name)) {
                         if (result instanceof Boolean && (Boolean) result) return true;
-                        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-                        if (adapter != null && adapter.isEnabled()) return true;
+                        if (isHostBluetoothEnabled()) return true;
                     }
                     if ("getState".equals(name)) {
                         if (result instanceof Integer && (Integer) result != BluetoothAdapter.STATE_OFF) return result;
-                        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-                        if (adapter != null) return adapter.getState();
+                        int hostState = getHostBluetoothState();
+                        if (hostState != BluetoothAdapter.STATE_OFF) return hostState;
                     }
                     if ("getBondedDevices".equals(name) || "getConnectedDevices".equals(name)) {
                         if (result == null) {
@@ -1342,12 +1397,10 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
                     Throwable cause = t.getCause() != null ? t.getCause() : t;
                     Slog.w(TAG, "IBluetooth." + name + " threw exception: " + cause.getMessage());
                     if ("isEnabled".equals(name)) {
-                        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-                        return adapter != null && adapter.isEnabled();
+                        return isHostBluetoothEnabled();
                     }
                     if ("getState".equals(name)) {
-                        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-                        return adapter != null ? adapter.getState() : BluetoothAdapter.STATE_OFF;
+                        return getHostBluetoothState();
                     }
                     if ("getBondedDevices".equals(name) || "getConnectedDevices".equals(name)) {
                         Class<?> returnType = method.getReturnType();
@@ -1427,12 +1480,10 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
             String name = method.getName();
             Slog.w(TAG, "IBluetoothManager." + name + " threw: " + cause.getMessage());
             if ("isEnabled".equals(name)) {
-                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-                return adapter != null && adapter.isEnabled();
+                return isHostBluetoothEnabled();
             }
             if ("getState".equals(name)) {
-                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-                return adapter != null ? adapter.getState() : BluetoothAdapter.STATE_OFF;
+                return getHostBluetoothState();
             }
             Class<?> returnType = method.getReturnType();
             if (returnType == boolean.class || returnType == Boolean.class) return Boolean.FALSE;
@@ -1521,13 +1572,7 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
             } catch (Throwable t) {
                 Slog.w(TAG, "IBluetoothManager.isEnabled threw: " + t.getMessage());
             }
-            try {
-                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-                if (adapter != null && adapter.isEnabled()) {
-                    return true;
-                }
-            } catch (Throwable ignored) {}
-            return false;
+            return isHostBluetoothEnabled();
         }
     }
 
@@ -1544,12 +1589,8 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
             } catch (Throwable t) {
                 Slog.w(TAG, "IBluetoothManager.getState threw: " + t.getMessage());
             }
-            try {
-                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-                if (adapter != null) {
-                    return adapter.getState();
-                }
-            } catch (Throwable ignored) {}
+            int hostState = getHostBluetoothState();
+            if (hostState != BluetoothAdapter.STATE_OFF) return hostState;
             return BluetoothAdapter.STATE_OFF;
         }
     }
@@ -1658,12 +1699,10 @@ public class IBluetoothProxy extends BinderInvocationStub {
             String name = method.getName();
             Slog.w(TAG, "IBluetooth." + name + " threw: " + cause.getMessage());
             if ("isEnabled".equals(name)) {
-                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-                return adapter != null && adapter.isEnabled();
+                return IBluetoothManagerProxy.isHostBluetoothEnabled();
             }
             if ("getState".equals(name)) {
-                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-                return adapter != null ? adapter.getState() : BluetoothAdapter.STATE_OFF;
+                return IBluetoothManagerProxy.getHostBluetoothState();
             }
             if ("getBondedDevices".equals(name) || "getConnectedDevices".equals(name)) {
                 Class<?> returnType = method.getReturnType();
@@ -1700,11 +1739,7 @@ public class IBluetoothProxy extends BinderInvocationStub {
             } catch (Throwable t) {
                 Slog.w(TAG, "IBluetooth.isEnabled hook threw: " + t.getMessage());
             }
-            try {
-                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-                if (adapter != null && adapter.isEnabled()) return true;
-            } catch (Throwable ignored) {}
-            return false;
+            return IBluetoothManagerProxy.isHostBluetoothEnabled();
         }
     }
 
@@ -1721,10 +1756,8 @@ public class IBluetoothProxy extends BinderInvocationStub {
             } catch (Throwable t) {
                 Slog.w(TAG, "IBluetooth.getState hook threw: " + t.getMessage());
             }
-            try {
-                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
-                if (adapter != null) return adapter.getState();
-            } catch (Throwable ignored) {}
+            int hostState = IBluetoothManagerProxy.getHostBluetoothState();
+            if (hostState != BluetoothAdapter.STATE_OFF) return hostState;
             return BluetoothAdapter.STATE_OFF;
         }
     }
