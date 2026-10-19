@@ -352,6 +352,15 @@ t=activity.read_text(encoding='utf-8')
 t=t.replace('BlackBoxCore.get().installPackageAsUser(name,user)',
     'BlackBoxCore.get().installPackageAsUser(new java.io.File(getPackageManager().getApplicationInfo(name,0).sourceDir),user)')
 activity.write_text(t,encoding='utf-8')
+stack=P/'runtime/src/main/java/com/tegufy/blackbox/core/system/am/ActivityStack.java'
+t=stack.read_text(encoding='utf-8')
+t=t.replace('mAms.moveTaskToFront(taskRecord.id, 0);',
+    'try { mAms.moveTaskToFront(taskRecord.id, 0); } catch (Throwable t) { t.printStackTrace(); }')
+t=t.replace('if (ComponentUtils.intentFilterEquals(topActivityRecord.intent, intent)) {',
+    'if (topActivityRecord != null && ComponentUtils.intentFilterEquals(topActivityRecord.intent, intent)) {')
+t=t.replace('return startActivityInSourceTask(intent,',
+    'if (topActivityRecord == null) return startActivityInNewTaskLocked(userId, intent, activityInfo, resultTo, launchModeFlags);\n        return startActivityInSourceTask(intent,')
+stack.write_text(t,encoding='utf-8')
 
 # Runtime licenses accompany the generated source and the experimental APK.
 notices=['Experimental Clone Apps runtime: locally adapted sources, not an upstream APK.',

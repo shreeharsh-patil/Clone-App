@@ -61,8 +61,9 @@ open class GuestHostActivity : Activity() {
             (content.parent as? ViewGroup)?.removeView(content)
             setContentView(content)
             synchronizeLifecycle()
-        } catch (e: CancellationException) { throw e }
-        catch (e: Throwable) { failure(e) }
+        } catch (e: CancellationException) {
+            if (e is TimeoutCancellationException) failure(e) else throw e
+        } catch (e: Throwable) { failure(e) }
     } }
     private fun synchronizeLifecycle() {
         val activity = guest ?: return

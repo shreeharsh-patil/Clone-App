@@ -175,7 +175,7 @@ class GeneralRuntimeEngine(private val context: Context, private val registry: R
                 OperationResult(true, "Guest Activity resumed", row.id)
             } catch (t: Throwable) {
                 withContext(NonCancellable) { registry.update { list -> list.map { if (it.id == row.id) it.copy(runtime = "failed") else it } } }
-                throw t
+                OperationResult(false, t.message ?: "Launch failed", row.id)
             }
         }
     }

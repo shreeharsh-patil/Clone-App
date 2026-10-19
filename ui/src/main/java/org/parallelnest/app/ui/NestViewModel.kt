@@ -41,12 +41,12 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
         } }
         viewModelScope.launch { registry.settings.catch { report("Unable to read preferences: ${it.message}") }.collect { p -> mutable.update { it.copy(theme=p[stringPreferencesKey("theme")] ?: "dark") } } }
         viewModelScope.launch { registry.instances.catch { report("Unable to read metadata: ${it.message}") }.collect { refresh() } }
-        viewModelScope.launch(Dispatchers.IO) { try { if(registry.pendingCreations().isNotEmpty()) report("An installation was interrupted. Refresh Apps to recover any completed work copies.") } catch(e:CancellationException){throw e}catch(e:Exception){report(e.message ?: "Metadata recovery failed")} }
+        viewModelScope.launch(Dispatchers.IO) { try { if(registry.pendingCreations().isNotEmpty()) report("An installation was interrupted. Refresh Apps to recover any completed work copies.") } catch(e:CancellationException){throw e}catch(e:Throwable){report(e.message ?: "Metadata recovery failed")} }
         refresh()
     }
     fun refresh() { viewModelScope.launch(Dispatchers.IO) {
         try { val runtime=engine.status();val rows=engine.getInstances();val legacy=registry.snapshot().filter { it.engine=="work_profile" };mutable.update { it.copy(runtime=runtime,instances=rows,legacy=legacy) } }
-        catch(e:CancellationException){throw e}catch(e:Exception){report(e.message ?: "Could not read instances")}
+        catch(e:CancellationException){throw e}catch(e:Throwable){report(e.message ?: "Could not read instances")}
     } }
     fun report(message: String) { mutable.update { it.copy(message=message) } }
     fun clearMessage() { mutable.update { it.copy(message=null) } }
@@ -54,7 +54,7 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
         if(queue)operation.lock() else if(!operation.tryLock())return
         mutable.update { it.copy(busy=true) }
         try { block()?.let { report(it.message) } }
-        catch(e:CancellationException){throw e}catch(e:Exception){report(e.message ?: "Operation failed")}
+        catch(e:CancellationException){throw e}catch(e:Throwable){report(e.message ?: "Operation failed")}
         finally { mutable.update { it.copy(busy=false) };operation.unlock();refresh() }
     }
     fun discover() { viewModelScope.launch { runOperation {
@@ -83,7 +83,7 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
                     if(state.value.creation.cancelRemaining)break
                     mutable.update { it.copy(creation=it.creation.copy(current=app,stage=CreationStage.CHECKING.description)) }
                     val result=try { engine.createInstance(app,app.label.take(80)) { stage -> mutable.update { it.copy(creation=it.creation.copy(stage=stage.description)) } } }
-                        catch(e:CancellationException){throw e}catch(e:Exception){OperationResult(false,e.message ?: "Installation failed")}
+                        catch(e:CancellationException){throw e}catch(e:Throwable){OperationResult(false,e.message ?: "Installation failed")}
                     if(result.success) { val left=state.value.selection-app.packageName;saved["selection"]=left;mutable.update { it.copy(selection=left) } }
                     mutable.update { it.copy(creation=it.creation.copy(finished=it.creation.finished+1,outcomes=it.creation.outcomes+"${app.label}: ${result.message}")) }
                 }
@@ -117,7 +117,7 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
                 val report=CompatibilityReport.parse(reply.getStringExtra("diagnostics_json") ?: error("No diagnostic response"))
                 check(report.managed && report.profile==row.profile && report.packageName==row.packageName) { "Diagnostic profile/app identity mismatch" }
                 mutable.update { it.copy(report=report) }
-            } catch(e:CancellationException){throw e}catch(e:Exception){report(e.message ?: "Could not inspect this work app")}
+            } catch(e:CancellationException){throw e}catch(e:Throwable){report(e.message ?: "Could not inspect this work app")}
             finally { mutable.update { it.copy(diagnosticBusy=false) } }
         }
     }
