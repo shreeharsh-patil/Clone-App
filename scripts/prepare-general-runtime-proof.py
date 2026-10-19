@@ -105,7 +105,10 @@ standard_permissions = {
     'android.permission.FOREGROUND_SERVICE_LOCATION',
     'android.permission.FOREGROUND_SERVICE_DATA_SYNC',
     'android.permission.FOREGROUND_SERVICE_PHONE_CALL',
-    'android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION'
+    'android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION',
+    'android.permission.NEARBY_WIFI_DEVICES',
+    'android.permission.BODY_SENSORS',
+    'android.permission.BODY_SENSORS_BACKGROUND'
 }
 for node in list(root):
     if node.tag=='uses-permission' and node.get(android+'name') not in standard_permissions: root.remove(node)
@@ -357,13 +360,14 @@ env_file.write_text(t,encoding='utf-8')
 bt_helper='''
     private static boolean isBluetoothPermission(String permission) {
         if (permission == null) return false;
-        return permission.equals("android.permission.BLUETOOTH")
-                || permission.equals("android.permission.BLUETOOTH_ADMIN")
-                || permission.equals("android.permission.BLUETOOTH_CONNECT")
-                || permission.equals("android.permission.BLUETOOTH_SCAN")
-                || permission.equals("android.permission.BLUETOOTH_ADVERTISE")
-                || permission.equals("android.permission.ACCESS_FINE_LOCATION")
-                || permission.equals("android.permission.ACCESS_COARSE_LOCATION");
+        return permission.startsWith("android.permission.BLUETOOTH")
+                || permission.equals(android.Manifest.permission.CAMERA)
+                || permission.equals("android.permission.FOREGROUND_SERVICE_CAMERA")
+                || permission.equals(android.Manifest.permission.ACCESS_FINE_LOCATION)
+                || permission.equals(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                || permission.equals("android.permission.NEARBY_WIFI_DEVICES")
+                || permission.equals("android.permission.BODY_SENSORS")
+                || permission.equals("android.permission.BODY_SENSORS_BACKGROUND");
     }
 '''
 pm_proxy=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IPackageManagerProxy.java'
@@ -826,6 +830,8 @@ allowed_helper='''
                 || permission.equals(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
                 || permission.startsWith("android.permission.READ_MEDIA_")
                 || permission.equals("android.permission.POST_NOTIFICATIONS")
+                || permission.equals("android.permission.NEARBY_WIFI_DEVICES")
+                || permission.equals("android.permission.BODY_SENSORS")
                 || permission.startsWith("android.permission.FOREGROUND_SERVICE");
     }
 '''
@@ -877,6 +883,18 @@ audio_bt_hooks='''
 '''
 t=t.replace('    @ProxyMethod("abandonAudioFocus")',audio_bt_hooks+'\n    @ProxyMethod("abandonAudioFocus")')
 audio_proxy.write_text(t,encoding='utf-8')
+
+wifi_proxy=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IWifiManagerProxy.java'
+t=wifi_proxy.read_text(encoding='utf-8')
+t=t.replace('replaceSystemService(Context.WIFI_SERVICE);\n    }',
+            'replaceSystemService(Context.WIFI_SERVICE);\n    }\n\n    @Override\n    public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) throws Throwable {\n        com.tegufy.blackbox.utils.MethodParameterUtils.replaceFirstAppPkg(args);\n        try {\n            return super.invoke(proxy, method, args);\n        } catch (Throwable t) {\n            if ("startScan".equals(method.getName())) return Boolean.FALSE;\n            throw t;\n        }\n    }')
+wifi_proxy.write_text(t,encoding='utf-8')
+
+wifi_scanner=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IWifiScannerProxy.java'
+t=wifi_scanner.read_text(encoding='utf-8')
+t=t.replace('replaceSystemService("wifiscanner");\n    }',
+            'replaceSystemService("wifiscanner");\n    }\n\n    @Override\n    public Object invoke(Object proxy, java.lang.reflect.Method method, Object[] args) throws Throwable {\n        com.tegufy.blackbox.utils.MethodParameterUtils.replaceFirstAppPkg(args);\n        return super.invoke(proxy, method, args);\n    }')
+wifi_scanner.write_text(t,encoding='utf-8')
 
 appops=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IAppOpsManagerProxy.java'
 t=appops.read_text(encoding='utf-8')
@@ -1219,7 +1237,8 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
         for (int i = 0; i < args.length; i++) {
             Object arg = args[i];
             if (arg == null) continue;
-            if (arg.getClass().getName().equals("android.content.AttributionSource")) {
+            String clsName = arg.getClass().getName();
+            if (clsName.equals("android.content.AttributionSource")) {
                 if (android.os.Build.VERSION.SDK_INT >= 31) {
                     try {
                         Object hostSource = BlackBoxCore.getContext().getAttributionSource();
@@ -1230,8 +1249,24 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
                     } catch (Throwable ignored) {}
                 }
                 fixAttributionSource(arg);
+            } else if (clsName.equals("android.os.WorkSource")) {
+                args[i] = null;
             } else if (arg instanceof Object[]) {
                 sanitizeBluetoothArgs((Object[]) arg);
+            } else if (arg instanceof java.util.List) {
+                java.util.List list = (java.util.List) arg;
+                for (int j = 0; j < list.size(); j++) {
+                    Object item = list.get(j);
+                    if (item instanceof String) {
+                        String str = (String) item;
+                        String guestPkg = BActivityThread.getAppPackageName();
+                        if ((guestPkg != null && guestPkg.equals(str)) || BlackBoxCore.get().isInstalled(str, BlackBoxCore.getUserId())) {
+                            try {
+                                list.set(j, BlackBoxCore.getHostPkg());
+                            } catch (Throwable ignored) {}
+                        }
+                    }
+                }
             } else if (arg instanceof String) {
                 String str = (String) arg;
                 String guestPkg = BActivityThread.getAppPackageName();
@@ -1346,6 +1381,132 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
         });
     }
 
+    public static IBinder createBluetoothScanBinderProxy(final IBinder rawBinder) {
+        if (rawBinder == null) return null;
+        if (Proxy.isProxyClass(rawBinder.getClass())) return rawBinder;
+        return (IBinder) Proxy.newProxyInstance(rawBinder.getClass().getClassLoader(), new Class<?>[]{IBinder.class}, new InvocationHandler() {
+            private Object mProxyInstance = null;
+
+            @Override
+            public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+                String name = method.getName();
+                if ("queryLocalInterface".equals(name) && args != null && args.length == 1) {
+                    String descriptor = (String) args[0];
+                    if ("android.bluetooth.IBluetoothScan".equals(descriptor)) {
+                        if (mProxyInstance == null) {
+                            try {
+                                Class<?> stubClass = Class.forName("android.bluetooth.IBluetoothScan$Stub");
+                                Method asInterfaceMethod = stubClass.getMethod("asInterface", IBinder.class);
+                                Object realIface = asInterfaceMethod.invoke(null, rawBinder);
+                                mProxyInstance = createBluetoothScanProxy(realIface);
+                            } catch (Throwable t) {
+                                Slog.w(TAG, "Failed to create IBluetoothScan proxy from binder: " + t.getMessage());
+                            }
+                        }
+                        if (mProxyInstance != null) {
+                            return mProxyInstance;
+                        }
+                    }
+                }
+                if ("equals".equals(name) && args != null && args.length == 1) {
+                    return proxy == args[0] || rawBinder.equals(args[0]);
+                }
+                if ("hashCode".equals(name) && (args == null || args.length == 0)) {
+                    return rawBinder.hashCode();
+                }
+                if ("toString".equals(name) && (args == null || args.length == 0)) {
+                    return "IBluetoothScanBinderProxy$" + rawBinder.toString();
+                }
+                return method.invoke(rawBinder, args);
+            }
+        });
+    }
+
+    public static Object createBluetoothScanProxy(final Object target) {
+        if (target == null) return null;
+        Class<?>[] interfaces = MethodParameterUtils.getAllInterface(target.getClass());
+        return Proxy.newProxyInstance(target.getClass().getClassLoader(), interfaces, new InvocationHandler() {
+            @Override
+            public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+                String name = method.getName();
+                if ("asBinder".equals(name)) {
+                    if (target instanceof IInterface) {
+                        return createBluetoothScanBinderProxy(((IInterface) target).asBinder());
+                    }
+                    if (target instanceof IBinder) {
+                        return createBluetoothScanBinderProxy((IBinder) target);
+                    }
+                }
+                if ("equals".equals(name) && args != null && args.length == 1) {
+                    return proxy == args[0] || target.equals(args[0]);
+                }
+                if ("hashCode".equals(name) && (args == null || args.length == 0)) {
+                    return target.hashCode();
+                }
+                if ("toString".equals(name) && (args == null || args.length == 0)) {
+                    return "IBluetoothScanProxy$" + target.toString();
+                }
+
+                sanitizeBluetoothArgs(args);
+
+                try {
+                    return method.invoke(target, args);
+                } catch (Throwable t) {
+                    Throwable cause = t.getCause() != null ? t.getCause() : t;
+                    Slog.w(TAG, "IBluetoothScan." + name + " threw: " + cause.getMessage());
+                    Class<?> returnType = method.getReturnType();
+                    if (returnType == boolean.class || returnType == Boolean.class) return Boolean.FALSE;
+                    if (returnType == int.class || returnType == Integer.class) return 0;
+                    if (returnType.isArray()) return java.lang.reflect.Array.newInstance(returnType.getComponentType(), 0);
+                    if (List.class.isAssignableFrom(returnType)) return Collections.emptyList();
+                    if (Set.class.isAssignableFrom(returnType)) return Collections.emptySet();
+                    return null;
+                }
+            }
+        });
+    }
+
+    public static IBinder createBluetoothGattBinderProxy(final IBinder rawBinder) {
+        if (rawBinder == null) return null;
+        if (Proxy.isProxyClass(rawBinder.getClass())) return rawBinder;
+        return (IBinder) Proxy.newProxyInstance(rawBinder.getClass().getClassLoader(), new Class<?>[]{IBinder.class}, new InvocationHandler() {
+            private Object mProxyInstance = null;
+
+            @Override
+            public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+                String name = method.getName();
+                if ("queryLocalInterface".equals(name) && args != null && args.length == 1) {
+                    String descriptor = (String) args[0];
+                    if ("android.bluetooth.IBluetoothGatt".equals(descriptor)) {
+                        if (mProxyInstance == null) {
+                            try {
+                                Class<?> stubClass = Class.forName("android.bluetooth.IBluetoothGatt$Stub");
+                                Method asInterfaceMethod = stubClass.getMethod("asInterface", IBinder.class);
+                                Object realIface = asInterfaceMethod.invoke(null, rawBinder);
+                                mProxyInstance = createBluetoothGattProxy(realIface);
+                            } catch (Throwable t) {
+                                Slog.w(TAG, "Failed to create IBluetoothGatt proxy from binder: " + t.getMessage());
+                            }
+                        }
+                        if (mProxyInstance != null) {
+                            return mProxyInstance;
+                        }
+                    }
+                }
+                if ("equals".equals(name) && args != null && args.length == 1) {
+                    return proxy == args[0] || rawBinder.equals(args[0]);
+                }
+                if ("hashCode".equals(name) && (args == null || args.length == 0)) {
+                    return rawBinder.hashCode();
+                }
+                if ("toString".equals(name) && (args == null || args.length == 0)) {
+                    return "IBluetoothGattBinderProxy$" + rawBinder.toString();
+                }
+                return method.invoke(rawBinder, args);
+            }
+        });
+    }
+
     public static Object createBluetoothProxy(final Object target) {
         if (target == null) return null;
         Class<?>[] interfaces = MethodParameterUtils.getAllInterface(target.getClass());
@@ -1374,6 +1535,27 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
                 sanitizeBluetoothArgs(args);
 
                 try {
+                    if ("getBluetoothScan".equals(name)) {
+                        try {
+                            Object result = method.invoke(target, args);
+                            if (result instanceof IBinder) return createBluetoothScanBinderProxy((IBinder) result);
+                            if (result != null) return createBluetoothScanProxy(result);
+                        } catch (Throwable t) {
+                            Slog.w(TAG, "IBluetooth.getBluetoothScan threw: " + t.getMessage());
+                        }
+                        return null;
+                    }
+                    if ("getBluetoothGatt".equals(name)) {
+                        try {
+                            Object result = method.invoke(target, args);
+                            if (result instanceof IBinder) return createBluetoothGattBinderProxy((IBinder) result);
+                            if (result != null) return createBluetoothGattProxy(result);
+                        } catch (Throwable t) {
+                            Slog.w(TAG, "IBluetooth.getBluetoothGatt threw: " + t.getMessage());
+                        }
+                        return null;
+                    }
+
                     Object result = method.invoke(target, args);
                     if ("isEnabled".equals(name)) {
                         if (result instanceof Boolean && (Boolean) result) return true;
@@ -1435,10 +1617,10 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
                 String name = method.getName();
                 if ("asBinder".equals(name)) {
                     if (target instanceof IInterface) {
-                        return ((IInterface) target).asBinder();
+                        return createBluetoothGattBinderProxy(((IInterface) target).asBinder());
                     }
                     if (target instanceof IBinder) {
-                        return target;
+                        return createBluetoothGattBinderProxy((IBinder) target);
                     }
                 }
                 if ("equals".equals(name) && args != null && args.length == 1) {
@@ -1533,6 +1715,9 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
                 result = method.invoke(who, args);
             } catch (Throwable t) {
                 Slog.w(TAG, "getBluetoothGatt threw: " + t.getMessage());
+            }
+            if (result instanceof IBinder) {
+                return createBluetoothGattBinderProxy((IBinder) result);
             }
             if (result != null) {
                 return createBluetoothGattProxy(result);
@@ -1686,6 +1871,18 @@ public class IBluetoothProxy extends BinderInvocationStub {
     public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
         IBluetoothManagerProxy.sanitizeBluetoothArgs(args);
         try {
+            if ("getBluetoothScan".equals(method.getName())) {
+                Object result = super.invoke(proxy, method, args);
+                if (result instanceof IBinder) return IBluetoothManagerProxy.createBluetoothScanBinderProxy((IBinder) result);
+                if (result != null) return IBluetoothManagerProxy.createBluetoothScanProxy(result);
+                return null;
+            }
+            if ("getBluetoothGatt".equals(method.getName())) {
+                Object result = super.invoke(proxy, method, args);
+                if (result instanceof IBinder) return IBluetoothManagerProxy.createBluetoothGattBinderProxy((IBinder) result);
+                if (result != null) return IBluetoothManagerProxy.createBluetoothGattProxy(result);
+                return null;
+            }
             Object result = super.invoke(proxy, method, args);
             if (("getBondedDevices".equals(method.getName()) || "getConnectedDevices".equals(method.getName())) && result == null) {
                 Class<?> returnType = method.getReturnType();
@@ -1765,13 +1962,112 @@ public class IBluetoothProxy extends BinderInvocationStub {
 '''
 write(Path('runtime/src/main/java/com/tegufy/blackbox/fake/service/IBluetoothProxy.java'),bt_proxy_code)
 
+camera_proxy_code='''package com.tegufy.blackbox.fake.service;
+
+import android.os.IBinder;
+import android.os.IInterface;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import black.android.os.BRServiceManager;
+import com.tegufy.blackbox.BlackBoxCore;
+import com.tegufy.blackbox.app.BActivityThread;
+import com.tegufy.blackbox.fake.hook.BinderInvocationStub;
+import com.tegufy.blackbox.utils.MethodParameterUtils;
+import com.tegufy.blackbox.utils.Slog;
+
+public class CameraServiceProxy extends BinderInvocationStub {
+    public static final String TAG = "CameraServiceProxy";
+
+    public CameraServiceProxy() {
+        super(BRServiceManager.get().getService("media.camera"));
+    }
+
+    @Override
+    protected Object getWho() {
+        IBinder binder = BRServiceManager.get().getService("media.camera");
+        if (binder == null) {
+            Slog.w(TAG, "media.camera binder is null");
+            return null;
+        }
+        try {
+            Class<?> stubClass = Class.forName("android.hardware.ICameraService$Stub");
+            Method asInterfaceMethod = stubClass.getMethod("asInterface", IBinder.class);
+            return asInterfaceMethod.invoke(null, binder);
+        } catch (Throwable t) {
+            Slog.e(TAG, "Failed to get ICameraService interface: " + t.getMessage());
+            return null;
+        }
+    }
+
+    @Override
+    protected void inject(Object baseInvocation, Object proxyInvocation) {
+        replaceSystemService("media.camera");
+    }
+
+    @Override
+    public boolean isBadEnv() {
+        return false;
+    }
+
+    public static void sanitizeCameraArgs(Object[] args) {
+        if (args == null) return;
+        String guestPkg = BActivityThread.getAppPackageName();
+        String hostPkg = BlackBoxCore.getHostPkg();
+        int hostUid = BlackBoxCore.getHostUid();
+
+        for (int i = 0; i < args.length; i++) {
+            Object arg = args[i];
+            if (arg == null) continue;
+
+            if (arg instanceof String) {
+                String str = (String) arg;
+                if ((guestPkg != null && guestPkg.equals(str)) || BlackBoxCore.get().isInstalled(str, BlackBoxCore.getUserId())) {
+                    args[i] = hostPkg;
+                }
+            } else if (arg.getClass().getName().equals("android.content.AttributionSource")) {
+                if (android.os.Build.VERSION.SDK_INT >= 31) {
+                    try {
+                        Object hostSource = BlackBoxCore.getContext().getAttributionSource();
+                        if (hostSource != null) {
+                            args[i] = hostSource;
+                            continue;
+                        }
+                    } catch (Throwable ignored) {}
+                }
+                IBluetoothManagerProxy.fixAttributionSource(arg);
+            } else if (arg instanceof Integer) {
+                int val = (Integer) arg;
+                if (val == BActivityThread.getUserId() || val == BlackBoxCore.getUserId() || val > 10000) {
+                    args[i] = hostUid;
+                }
+            } else if (arg instanceof Object[]) {
+                sanitizeCameraArgs((Object[]) arg);
+            }
+        }
+    }
+
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+        sanitizeCameraArgs(args);
+        try {
+            return super.invoke(proxy, method, args);
+        } catch (Throwable t) {
+            Throwable cause = t.getCause() != null ? t.getCause() : t;
+            Slog.w(TAG, "ICameraService." + method.getName() + " threw: " + cause.getMessage());
+            throw cause;
+        }
+    }
+}
+'''
+write(Path('runtime/src/main/java/com/tegufy/blackbox/fake/service/CameraServiceProxy.java'),camera_proxy_code)
+
 hook_mgr=P/'runtime/src/main/java/com/tegufy/blackbox/fake/hook/HookManager.java'
 t=hook_mgr.read_text(encoding='utf-8')
 t=t.replace('import com.tegufy.blackbox.fake.service.IAudioServiceProxy;',
-            'import com.tegufy.blackbox.fake.service.IAudioServiceProxy;\nimport com.tegufy.blackbox.fake.service.IBluetoothManagerProxy;\nimport com.tegufy.blackbox.fake.service.IBluetoothProxy;\nimport com.tegufy.blackbox.fake.service.GooglePlayServicesProxy;')
+            'import com.tegufy.blackbox.fake.service.IAudioServiceProxy;\nimport com.tegufy.blackbox.fake.service.IBluetoothManagerProxy;\nimport com.tegufy.blackbox.fake.service.IBluetoothProxy;\nimport com.tegufy.blackbox.fake.service.GooglePlayServicesProxy;\nimport com.tegufy.blackbox.fake.service.CameraServiceProxy;')
 t=t.replace('addInjector(new GooglePlayServicesProxy());', '// GooglePlayServicesProxy moved to unconditional init')
 t=t.replace('addInjector(new IAudioServiceProxy());',
-            'addInjector(new IAudioServiceProxy());\n            addInjector(new GooglePlayServicesProxy());\n            addInjector(new IBluetoothManagerProxy());\n            addInjector(new IBluetoothProxy());')
+            'addInjector(new IAudioServiceProxy());\n            addInjector(new GooglePlayServicesProxy());\n            addInjector(new IBluetoothManagerProxy());\n            addInjector(new IBluetoothProxy());\n            addInjector(new CameraServiceProxy());')
 hook_mgr.write_text(t,encoding='utf-8')
 
 # Runtime licenses accompany the generated source and the experimental APK.
