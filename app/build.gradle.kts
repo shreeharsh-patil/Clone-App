@@ -16,8 +16,8 @@ android {
         applicationId = "org.parallelnest.app"
         minSdk = 33
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.3.1-prototype"
+        versionCode = 6
+        versionName = "0.3.2-prototype"
         manifestPlaceholders["applicationLabel"] = if (generalRuntime) "Clone Apps Experimental" else "@string/app_name"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
