@@ -361,24 +361,60 @@ bt_helper='''
     private static boolean isBluetoothPermission(String permission) {
         if (permission == null) return false;
         return permission.startsWith("android.permission.BLUETOOTH")
+                || permission.startsWith("android.permission.ACCESS_")
+                || permission.startsWith("android.permission.READ_MEDIA_")
+                || permission.startsWith("android.permission.FOREGROUND_SERVICE")
+                || permission.startsWith("android.permission.BODY_SENSORS")
                 || permission.equals(android.Manifest.permission.CAMERA)
                 || permission.equals("android.permission.FOREGROUND_SERVICE_CAMERA")
-                || permission.equals(android.Manifest.permission.ACCESS_FINE_LOCATION)
-                || permission.equals(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                || permission.equals(android.Manifest.permission.RECORD_AUDIO)
+                || permission.equals(android.Manifest.permission.MODIFY_AUDIO_SETTINGS)
+                || permission.equals(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+                || permission.equals(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                || permission.equals("android.permission.READ_MEDIA_VISUAL")
+                || permission.equals("android.permission.POST_NOTIFICATIONS")
                 || permission.equals("android.permission.NEARBY_WIFI_DEVICES")
-                || permission.equals("android.permission.BODY_SENSORS")
-                || permission.equals("android.permission.BODY_SENSORS_BACKGROUND");
+                || permission.equals("android.permission.ACTIVITY_RECOGNITION")
+                || permission.equals(android.Manifest.permission.VIBRATE)
+                || permission.equals(android.Manifest.permission.WAKE_LOCK)
+                || permission.equals(android.Manifest.permission.READ_CONTACTS)
+                || permission.equals(android.Manifest.permission.WRITE_CONTACTS)
+                || permission.equals(android.Manifest.permission.READ_PHONE_STATE)
+                || permission.equals(android.Manifest.permission.CALL_PHONE);
+    }
+
+    @ProxyMethod("checkUidPermission")
+    public static class CheckUidPermission extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            String permission = null;
+            if (args != null) {
+                for (Object arg : args) {
+                    if (arg instanceof String) {
+                        permission = (String) arg;
+                        break;
+                    }
+                }
+            }
+            if (permission != null && (isAudioPermission(permission) || isBluetoothPermission(permission))) {
+                Slog.d(TAG, "CheckUidPermission: Granting permission: " + permission);
+                return PackageManager.PERMISSION_GRANTED;
+            }
+            MethodParameterUtils.replaceLastUid(args);
+            return method.invoke(who, args);
+        }
     }
 '''
 pm_proxy=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IPackageManagerProxy.java'
 t=pm_proxy.read_text(encoding='utf-8')
 t=t.replace('private static boolean isStorageOrMediaPermission',bt_helper+'\n    private static boolean isStorageOrMediaPermission')
+t=t.replace('addMethodHook(new RequestPermissions());', 'addMethodHook(new RequestPermissions());\n        addMethodHook(new CheckUidPermission());')
 t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "SimpleAudioPermissionHook: Granting audio permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }',
-            'if (isAudioPermission(permission) || isBluetoothPermission(permission)) {\n                Slog.d(TAG, "SimpleAudioPermissionHook: Granting permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }')
+            'if (isAudioPermission(permission) || isBluetoothPermission(permission) || isStorageOrMediaPermission(permission) || isNotificationOrXiaomiPermission(permission)) {\n                Slog.d(TAG, "SimpleAudioPermissionHook: Granting permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }')
 t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "CheckSelfPermission: Granting audio permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }',
-            'if (isAudioPermission(permission) || isBluetoothPermission(permission)) {\n                Slog.d(TAG, "CheckSelfPermission: Granting permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }')
+            'if (isAudioPermission(permission) || isBluetoothPermission(permission) || isStorageOrMediaPermission(permission) || isNotificationOrXiaomiPermission(permission)) {\n                Slog.d(TAG, "CheckSelfPermission: Granting permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }')
 t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "ShouldShowRequestPermissionRationale: Not showing rationale for audio permission: " + permission);\n                return false;\n            }',
-            'if (isAudioPermission(permission) || isBluetoothPermission(permission)) {\n                Slog.d(TAG, "ShouldShowRequestPermissionRationale: Not showing rationale for permission: " + permission);\n                return false;\n            }')
+            'if (isAudioPermission(permission) || isBluetoothPermission(permission) || isStorageOrMediaPermission(permission) || isNotificationOrXiaomiPermission(permission)) {\n                Slog.d(TAG, "ShouldShowRequestPermissionRationale: Not showing rationale for permission: " + permission);\n                return false;\n            }')
 
 pkg_info_old='''            if ("com.android.vending".equals(packageName)) {
                 return createFakeGooglePlayServicesPackageInfo();
@@ -793,11 +829,17 @@ t=t.replace('import com.tegufy.blackbox.fake.hook.BinderInvocationStub;',
 perm_check_hooks='''        addMethodHook("checkPermission", new MethodHook() {
             @Override
             protected Object hook(Object who, java.lang.reflect.Method method, Object[] args) throws Throwable {
-                if (args != null && args.length > 0 && args[0] instanceof String) {
-                    String permission = (String) args[0];
-                    if (isAllowedPermission(permission)) {
-                        return PackageManager.PERMISSION_GRANTED;
+                String permission = null;
+                if (args != null) {
+                    for (Object arg : args) {
+                        if (arg instanceof String) {
+                            permission = (String) arg;
+                            break;
+                        }
                     }
+                }
+                if (isAllowedPermission(permission)) {
+                    return PackageManager.PERMISSION_GRANTED;
                 }
                 com.tegufy.blackbox.utils.MethodParameterUtils.replaceFirstAppPkg(args);
                 return method.invoke(who, args);
@@ -806,11 +848,17 @@ perm_check_hooks='''        addMethodHook("checkPermission", new MethodHook() {
         addMethodHook("checkUidPermission", new MethodHook() {
             @Override
             protected Object hook(Object who, java.lang.reflect.Method method, Object[] args) throws Throwable {
-                if (args != null && args.length > 1 && args[1] instanceof String) {
-                    String permission = (String) args[1];
-                    if (isAllowedPermission(permission)) {
-                        return PackageManager.PERMISSION_GRANTED;
+                String permission = null;
+                if (args != null) {
+                    for (Object arg : args) {
+                        if (arg instanceof String) {
+                            permission = (String) arg;
+                            break;
+                        }
                     }
+                }
+                if (isAllowedPermission(permission)) {
+                    return PackageManager.PERMISSION_GRANTED;
                 }
                 com.tegufy.blackbox.utils.MethodParameterUtils.replaceLastUid(args);
                 return method.invoke(who, args);
@@ -821,18 +869,26 @@ allowed_helper='''
     private static boolean isAllowedPermission(String permission) {
         if (permission == null) return false;
         return permission.startsWith("android.permission.BLUETOOTH")
-                || permission.equals(android.Manifest.permission.ACCESS_FINE_LOCATION)
-                || permission.equals(android.Manifest.permission.ACCESS_COARSE_LOCATION)
+                || permission.startsWith("android.permission.ACCESS_")
+                || permission.startsWith("android.permission.READ_MEDIA_")
+                || permission.startsWith("android.permission.FOREGROUND_SERVICE")
+                || permission.startsWith("android.permission.BODY_SENSORS")
+                || permission.equals(android.Manifest.permission.CAMERA)
+                || permission.equals("android.permission.FOREGROUND_SERVICE_CAMERA")
                 || permission.equals(android.Manifest.permission.RECORD_AUDIO)
                 || permission.equals(android.Manifest.permission.MODIFY_AUDIO_SETTINGS)
-                || permission.equals(android.Manifest.permission.CAMERA)
                 || permission.equals(android.Manifest.permission.READ_EXTERNAL_STORAGE)
                 || permission.equals(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
-                || permission.startsWith("android.permission.READ_MEDIA_")
+                || permission.equals("android.permission.READ_MEDIA_VISUAL")
                 || permission.equals("android.permission.POST_NOTIFICATIONS")
                 || permission.equals("android.permission.NEARBY_WIFI_DEVICES")
-                || permission.equals("android.permission.BODY_SENSORS")
-                || permission.startsWith("android.permission.FOREGROUND_SERVICE");
+                || permission.equals("android.permission.ACTIVITY_RECOGNITION")
+                || permission.equals(android.Manifest.permission.VIBRATE)
+                || permission.equals(android.Manifest.permission.WAKE_LOCK)
+                || permission.equals(android.Manifest.permission.READ_CONTACTS)
+                || permission.equals(android.Manifest.permission.WRITE_CONTACTS)
+                || permission.equals(android.Manifest.permission.READ_PHONE_STATE)
+                || permission.equals(android.Manifest.permission.CALL_PHONE);
     }
 '''
 t=t.replace('addMethodHook(new PkgMethodProxy("shouldShowRequestPermissionRationale"));',
@@ -898,8 +954,149 @@ wifi_scanner.write_text(t,encoding='utf-8')
 
 appops=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IAppOpsManagerProxy.java'
 t=appops.read_text(encoding='utf-8')
-t=t.replace('if (name != null && (name.contains("RECORD_AUDIO") || name.contains("AUDIO") || name.contains("MICROPHONE")))',
-            'if (name != null && isMediaStorageOrAudioOp(name))')
+sync_noted_helper='''
+    public static Object createSyncNotedAppOp(int op, String packageName) {
+        if (android.os.Build.VERSION.SDK_INT < 30) return null;
+        try {
+            Class<?> clazz = Class.forName("android.app.SyncNotedAppOp");
+            for (java.lang.reflect.Constructor<?> ctor : clazz.getConstructors()) {
+                Class<?>[] params = ctor.getParameterTypes();
+                if (params.length == 4 && params[0] == int.class && params[1] == int.class) {
+                    return ctor.newInstance(AppOpsManager.MODE_ALLOWED, op, null, packageName);
+                }
+                if (params.length == 2 && params[0] == int.class && params[1] == String.class) {
+                    return ctor.newInstance(AppOpsManager.MODE_ALLOWED, null);
+                }
+                if (params.length == 1 && params[0] == int.class) {
+                    return ctor.newInstance(AppOpsManager.MODE_ALLOWED);
+                }
+            }
+        } catch (Throwable t) {
+            Slog.w(TAG, "createSyncNotedAppOp failed: " + t.getMessage());
+        }
+        return null;
+    }
+'''
+t=t.replace('private static String getOpPublicName(int op)',sync_noted_helper+'\n    private static String getOpPublicName(int op)')
+
+old_appops_invoke='''        if (methodName.startsWith("check") || 
+            methodName.startsWith("note") || 
+            methodName.startsWith("start")) {
+            Slog.d(TAG, "AppOps invoke: Bypassing system for " + methodName + ", allowing operation");
+            return AppOpsManager.MODE_ALLOWED;
+        }'''
+new_appops_invoke='''        if (methodName.startsWith("check") || 
+            methodName.startsWith("note") || 
+            methodName.startsWith("start")) {
+            Slog.d(TAG, "AppOps invoke: Bypassing system for " + methodName + ", allowing operation");
+            Class<?> returnType = method.getReturnType();
+            if (returnType != null && returnType.getName().contains("SyncNotedAppOp")) {
+                int opCode = 0;
+                if (args != null && args.length > 0 && args[0] instanceof Integer) {
+                    opCode = (Integer) args[0];
+                }
+                return createSyncNotedAppOp(opCode, BlackBoxCore.getHostPkg());
+            }
+            if (returnType == int.class || returnType == Integer.class) {
+                return AppOpsManager.MODE_ALLOWED;
+            }
+            return null;
+        }'''
+t=t.replace(old_appops_invoke, new_appops_invoke)
+
+old_note_op='''    @ProxyMethod("noteOp")
+    public static class NoteOp extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            try {
+                int op = (int) args[0];
+                String name = getOpPublicName(op);
+                if (name != null && (name.contains("RECORD_AUDIO") || name.contains("AUDIO") || name.contains("MICROPHONE"))) {
+                    Slog.d(TAG, "AppOps NoteOp: Allowing RECORD_AUDIO operation: " + name);
+                    return AppOpsManager.MODE_ALLOWED;
+                }
+            } catch (Throwable ignored) {
+            }
+            return method.invoke(who, args);
+        }
+    }
+
+    
+    @ProxyMethod("noteOpNoThrow")
+    public static class NoteOpNoThrow extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            try {
+                int op = (int) args[0];
+                String name = getOpPublicName(op);
+                if (name != null && (name.contains("RECORD_AUDIO") || name.contains("AUDIO") || name.contains("MICROPHONE"))) {
+                    Slog.d(TAG, "AppOps NoteOpNoThrow: Allowing RECORD_AUDIO operation: " + name);
+                    return AppOpsManager.MODE_ALLOWED;
+                }
+            } catch (Throwable ignored) {
+            }
+            return method.invoke(who, args);
+        }
+    }'''
+new_note_op='''    @ProxyMethod("noteOp")
+    public static class NoteOp extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return AppOpsManager.MODE_ALLOWED;
+        }
+    }
+
+    @ProxyMethod("noteOpNoThrow")
+    public static class NoteOpNoThrow extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return AppOpsManager.MODE_ALLOWED;
+        }
+    }
+
+    @ProxyMethod("checkOpRaw")
+    public static class CheckOpRaw extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return AppOpsManager.MODE_ALLOWED;
+        }
+    }
+
+    @ProxyMethod("checkOp")
+    public static class CheckOp extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return AppOpsManager.MODE_ALLOWED;
+        }
+    }'''
+t=t.replace(old_note_op, new_note_op)
+
+old_note_operation='''    @ProxyMethod("noteOperation")
+    public static class NoteOperation extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            
+            Slog.d(TAG, "AppOps NoteOperation: Bypassing system check, allowing operation");
+            return AppOpsManager.MODE_ALLOWED;
+        }
+    }'''
+new_note_operation='''    @ProxyMethod("noteOperation")
+    public static class NoteOperation extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            Slog.d(TAG, "AppOps NoteOperation: Bypassing system check, allowing operation");
+            Class<?> returnType = method.getReturnType();
+            if (returnType != null && returnType.getName().contains("SyncNotedAppOp")) {
+                int opCode = 0;
+                if (args != null && args.length > 0 && args[0] instanceof Integer) {
+                    opCode = (Integer) args[0];
+                }
+                return createSyncNotedAppOp(opCode, BlackBoxCore.getHostPkg());
+            }
+            return AppOpsManager.MODE_ALLOWED;
+        }
+    }'''
+t=t.replace(old_note_operation, new_note_operation)
 appops.write_text(t,encoding='utf-8')
 
 act_common=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/ActivityManagerCommonProxy.java'
@@ -907,7 +1104,59 @@ t=act_common.read_text(encoding='utf-8')
 needle_perm='if (dataString != null && dataString.equals("package:" + BActivityThread.getAppPackageName())) {\n                intent.setData(Uri.parse("package:" + BlackBoxCore.getHostPkg()));\n            }'
 replace_perm=needle_perm+'''
             if ("android.content.pm.action.REQUEST_PERMISSIONS".equals(intent.getAction())) {
-                intent.putExtra("android.content.pm.extra.REQUEST_PERMISSIONS_PACKAGE_NAME", BlackBoxCore.getHostPkg());
+                final String[] perms = intent.getStringArrayExtra("android.content.pm.extra.REQUEST_PERMISSIONS_NAMES");
+                final IBinder rTo = StartActivityCompat.getResultTo(args);
+                final String rWho = StartActivityCompat.getResultWho(args);
+                final int reqCode = StartActivityCompat.getRequestCode(args);
+                if (perms != null && perms.length > 0) {
+                    new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+                        @Override
+                        public void run() {
+                            try {
+                                android.app.Activity activity = null;
+                                if (rTo != null) {
+                                    activity = BActivityThread.getActivityByToken(rTo);
+                                }
+                                if (activity == null) {
+                                    java.util.Map<IBinder, Object> acts = black.android.app.BRActivityThread.get(BlackBoxCore.mainThread()).mActivities();
+                                    if (acts != null && !acts.isEmpty()) {
+                                        for (Object rec : acts.values()) {
+                                            android.app.Activity a = black.android.app.BRActivityThreadActivityClientRecord.get(rec).activity();
+                                            if (a != null && !a.isFinishing()) {
+                                                activity = a;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                if (activity != null) {
+                                    int[] grantResults = new int[perms.length];
+                                    for (int i = 0; i < perms.length; i++) {
+                                        grantResults[i] = android.content.pm.PackageManager.PERMISSION_GRANTED;
+                                    }
+                                    Intent resultIntent = new Intent();
+                                    resultIntent.putExtra("android.content.pm.extra.REQUEST_PERMISSIONS_NAMES", perms);
+                                    resultIntent.putExtra("android.content.pm.extra.REQUEST_PERMISSIONS_RESULTS", grantResults);
+
+                                    try {
+                                        Method dispatch = android.app.Activity.class.getDeclaredMethod("dispatchActivityResult", String.class, int.class, int.class, Intent.class);
+                                        dispatch.setAccessible(true);
+                                        dispatch.invoke(activity, rWho, reqCode, android.app.Activity.RESULT_OK, resultIntent);
+                                    } catch (Throwable t) {
+                                        try {
+                                            Method onReq = android.app.Activity.class.getDeclaredMethod("onRequestPermissionsResult", int.class, String[].class, int[].class);
+                                            onReq.setAccessible(true);
+                                            onReq.invoke(activity, reqCode, perms, grantResults);
+                                        } catch (Throwable ignored) {}
+                                    }
+                                }
+                            } catch (Throwable t) {
+                                Slog.w(TAG, "Failed to dispatch granted permission result: " + t.getMessage());
+                            }
+                        }
+                    });
+                    return 0;
+                }
             }
             if ("com.google.android.gms.availability.ACTION_RESOLVE_ERROR".equals(intent.getAction())) {
                 Slog.d(TAG, "Blocked GMS ACTION_RESOLVE_ERROR");
@@ -1188,6 +1437,11 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
 
     public static boolean isHostBluetoothEnabled() {
         try {
+            int on = android.provider.Settings.Global.getInt(
+                BlackBoxCore.getContext().getContentResolver(), "bluetooth_on", 0);
+            if (on != 0) return true;
+        } catch (Throwable ignored) {}
+        try {
             android.bluetooth.BluetoothManager bm = (android.bluetooth.BluetoothManager) BlackBoxCore.getContext().getSystemService(android.content.Context.BLUETOOTH_SERVICE);
             if (bm != null && bm.getAdapter() != null) {
                 return bm.getAdapter().isEnabled();
@@ -1202,6 +1456,11 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
 
     public static int getHostBluetoothState() {
         try {
+            int on = android.provider.Settings.Global.getInt(
+                BlackBoxCore.getContext().getContentResolver(), "bluetooth_on", 0);
+            if (on != 0) return BluetoothAdapter.STATE_ON;
+        } catch (Throwable ignored) {}
+        try {
             android.bluetooth.BluetoothManager bm = (android.bluetooth.BluetoothManager) BlackBoxCore.getContext().getSystemService(android.content.Context.BLUETOOTH_SERVICE);
             if (bm != null && bm.getAdapter() != null) {
                 int s = bm.getAdapter().getState();
@@ -1212,7 +1471,7 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
             BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
             if (adapter != null) return adapter.getState();
         } catch (Throwable ignored) {}
-        return BluetoothAdapter.STATE_OFF;
+        return isHostBluetoothEnabled() ? BluetoothAdapter.STATE_ON : BluetoothAdapter.STATE_OFF;
     }
 
     public static void fixBluetoothAdapterAttributionSource() {
@@ -1557,14 +1816,25 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
                     }
 
                     Object result = method.invoke(target, args);
-                    if ("isEnabled".equals(name)) {
+                    if ("isEnabled".equals(name) || "isLeEnabled".equals(name)) {
                         if (result instanceof Boolean && (Boolean) result) return true;
                         if (isHostBluetoothEnabled()) return true;
                     }
-                    if ("getState".equals(name)) {
+                    if ("getState".equals(name) || "getLeState".equals(name)) {
                         if (result instanceof Integer && (Integer) result != BluetoothAdapter.STATE_OFF) return result;
                         int hostState = getHostBluetoothState();
                         if (hostState != BluetoothAdapter.STATE_OFF) return hostState;
+                    }
+                    if ("isMultipleAdvertisementSupported".equals(name) ||
+                        "isPeripheralModeSupported".equals(name) ||
+                        "isOffloadedFilteringSupported".equals(name) ||
+                        "isOffloadedScanBatchingSupported".equals(name) ||
+                        "isLe2MPhySupported".equals(name) ||
+                        "isLeCodedPhySupported".equals(name) ||
+                        "isLeExtendedAdvertisingSupported".equals(name) ||
+                        "isLePeriodicAdvertisingSupported".equals(name)) {
+                        if (result instanceof Boolean && (Boolean) result) return true;
+                        if (isHostBluetoothEnabled()) return true;
                     }
                     if ("getBondedDevices".equals(name) || "getConnectedDevices".equals(name)) {
                         if (result == null) {
@@ -1578,11 +1848,21 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
                 } catch (Throwable t) {
                     Throwable cause = t.getCause() != null ? t.getCause() : t;
                     Slog.w(TAG, "IBluetooth." + name + " threw exception: " + cause.getMessage());
-                    if ("isEnabled".equals(name)) {
+                    if ("isEnabled".equals(name) || "isLeEnabled".equals(name)) {
                         return isHostBluetoothEnabled();
                     }
-                    if ("getState".equals(name)) {
+                    if ("getState".equals(name) || "getLeState".equals(name)) {
                         return getHostBluetoothState();
+                    }
+                    if ("isMultipleAdvertisementSupported".equals(name) ||
+                        "isPeripheralModeSupported".equals(name) ||
+                        "isOffloadedFilteringSupported".equals(name) ||
+                        "isOffloadedScanBatchingSupported".equals(name) ||
+                        "isLe2MPhySupported".equals(name) ||
+                        "isLeCodedPhySupported".equals(name) ||
+                        "isLeExtendedAdvertisingSupported".equals(name) ||
+                        "isLePeriodicAdvertisingSupported".equals(name)) {
+                        return isHostBluetoothEnabled();
                     }
                     if ("getBondedDevices".equals(name) || "getConnectedDevices".equals(name)) {
                         Class<?> returnType = method.getReturnType();
@@ -1780,6 +2060,60 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
         }
     }
 
+    @ProxyMethod("isMultipleAdvertisementSupported")
+    public static class IsMultipleAdvertisementSupported extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            sanitizeBluetoothArgs(args);
+            try {
+                Object result = method.invoke(who, args);
+                if (result instanceof Boolean && (Boolean) result) return true;
+            } catch (Throwable ignored) {}
+            return isHostBluetoothEnabled();
+        }
+    }
+
+    @ProxyMethod("isPeripheralModeSupported")
+    public static class IsPeripheralModeSupported extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            sanitizeBluetoothArgs(args);
+            try {
+                Object result = method.invoke(who, args);
+                if (result instanceof Boolean && (Boolean) result) return true;
+            } catch (Throwable ignored) {}
+            return isHostBluetoothEnabled();
+        }
+    }
+
+    @ProxyMethod("isLeEnabled")
+    public static class IsLeEnabled extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            sanitizeBluetoothArgs(args);
+            try {
+                Object result = method.invoke(who, args);
+                if (result instanceof Boolean && (Boolean) result) return true;
+            } catch (Throwable ignored) {}
+            return isHostBluetoothEnabled();
+        }
+    }
+
+    @ProxyMethod("getLeState")
+    public static class GetLeState extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            sanitizeBluetoothArgs(args);
+            try {
+                Object result = method.invoke(who, args);
+                if (result instanceof Integer && (Integer) result != BluetoothAdapter.STATE_OFF) return result;
+            } catch (Throwable ignored) {}
+            int hostState = getHostBluetoothState();
+            if (hostState != BluetoothAdapter.STATE_OFF) return hostState;
+            return BluetoothAdapter.STATE_OFF;
+        }
+    }
+
     @ProxyMethod("enable")
     public static class Enable extends MethodHook {
         @Override
@@ -1884,7 +2218,28 @@ public class IBluetoothProxy extends BinderInvocationStub {
                 return null;
             }
             Object result = super.invoke(proxy, method, args);
-            if (("getBondedDevices".equals(method.getName()) || "getConnectedDevices".equals(method.getName())) && result == null) {
+            String name = method.getName();
+            if ("isEnabled".equals(name) || "isLeEnabled".equals(name)) {
+                if (result instanceof Boolean && (Boolean) result) return true;
+                if (IBluetoothManagerProxy.isHostBluetoothEnabled()) return true;
+            }
+            if ("getState".equals(name) || "getLeState".equals(name)) {
+                if (result instanceof Integer && (Integer) result != BluetoothAdapter.STATE_OFF) return result;
+                int hostState = IBluetoothManagerProxy.getHostBluetoothState();
+                if (hostState != BluetoothAdapter.STATE_OFF) return hostState;
+            }
+            if ("isMultipleAdvertisementSupported".equals(name) ||
+                "isPeripheralModeSupported".equals(name) ||
+                "isOffloadedFilteringSupported".equals(name) ||
+                "isOffloadedScanBatchingSupported".equals(name) ||
+                "isLe2MPhySupported".equals(name) ||
+                "isLeCodedPhySupported".equals(name) ||
+                "isLeExtendedAdvertisingSupported".equals(name) ||
+                "isLePeriodicAdvertisingSupported".equals(name)) {
+                if (result instanceof Boolean && (Boolean) result) return true;
+                if (IBluetoothManagerProxy.isHostBluetoothEnabled()) return true;
+            }
+            if (("getBondedDevices".equals(name) || "getConnectedDevices".equals(name)) && result == null) {
                 Class<?> returnType = method.getReturnType();
                 if (returnType.isArray()) return java.lang.reflect.Array.newInstance(returnType.getComponentType(), 0);
                 if (Set.class.isAssignableFrom(returnType)) return Collections.emptySet();
@@ -1895,11 +2250,21 @@ public class IBluetoothProxy extends BinderInvocationStub {
             Throwable cause = t.getCause() != null ? t.getCause() : t;
             String name = method.getName();
             Slog.w(TAG, "IBluetooth." + name + " threw: " + cause.getMessage());
-            if ("isEnabled".equals(name)) {
+            if ("isEnabled".equals(name) || "isLeEnabled".equals(name)) {
                 return IBluetoothManagerProxy.isHostBluetoothEnabled();
             }
-            if ("getState".equals(name)) {
+            if ("getState".equals(name) || "getLeState".equals(name)) {
                 return IBluetoothManagerProxy.getHostBluetoothState();
+            }
+            if ("isMultipleAdvertisementSupported".equals(name) ||
+                "isPeripheralModeSupported".equals(name) ||
+                "isOffloadedFilteringSupported".equals(name) ||
+                "isOffloadedScanBatchingSupported".equals(name) ||
+                "isLe2MPhySupported".equals(name) ||
+                "isLeCodedPhySupported".equals(name) ||
+                "isLeExtendedAdvertisingSupported".equals(name) ||
+                "isLePeriodicAdvertisingSupported".equals(name)) {
+                return IBluetoothManagerProxy.isHostBluetoothEnabled();
             }
             if ("getBondedDevices".equals(name) || "getConnectedDevices".equals(name)) {
                 Class<?> returnType = method.getReturnType();
@@ -1953,6 +2318,60 @@ public class IBluetoothProxy extends BinderInvocationStub {
             } catch (Throwable t) {
                 Slog.w(TAG, "IBluetooth.getState hook threw: " + t.getMessage());
             }
+            int hostState = IBluetoothManagerProxy.getHostBluetoothState();
+            if (hostState != BluetoothAdapter.STATE_OFF) return hostState;
+            return BluetoothAdapter.STATE_OFF;
+        }
+    }
+
+    @ProxyMethod("isMultipleAdvertisementSupported")
+    public static class IsMultipleAdvertisementSupported extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            IBluetoothManagerProxy.sanitizeBluetoothArgs(args);
+            try {
+                Object result = method.invoke(who, args);
+                if (result instanceof Boolean && (Boolean) result) return true;
+            } catch (Throwable ignored) {}
+            return IBluetoothManagerProxy.isHostBluetoothEnabled();
+        }
+    }
+
+    @ProxyMethod("isPeripheralModeSupported")
+    public static class IsPeripheralModeSupported extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            IBluetoothManagerProxy.sanitizeBluetoothArgs(args);
+            try {
+                Object result = method.invoke(who, args);
+                if (result instanceof Boolean && (Boolean) result) return true;
+            } catch (Throwable ignored) {}
+            return IBluetoothManagerProxy.isHostBluetoothEnabled();
+        }
+    }
+
+    @ProxyMethod("isLeEnabled")
+    public static class IsLeEnabled extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            IBluetoothManagerProxy.sanitizeBluetoothArgs(args);
+            try {
+                Object result = method.invoke(who, args);
+                if (result instanceof Boolean && (Boolean) result) return true;
+            } catch (Throwable ignored) {}
+            return IBluetoothManagerProxy.isHostBluetoothEnabled();
+        }
+    }
+
+    @ProxyMethod("getLeState")
+    public static class GetLeState extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            IBluetoothManagerProxy.sanitizeBluetoothArgs(args);
+            try {
+                Object result = method.invoke(who, args);
+                if (result instanceof Integer && (Integer) result != BluetoothAdapter.STATE_OFF) return result;
+            } catch (Throwable ignored) {}
             int hostState = IBluetoothManagerProxy.getHostBluetoothState();
             if (hostState != BluetoothAdapter.STATE_OFF) return hostState;
             return BluetoothAdapter.STATE_OFF;
