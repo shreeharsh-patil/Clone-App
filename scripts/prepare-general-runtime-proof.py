@@ -1258,24 +1258,99 @@ replace_perm=needle_perm+'''
                     || "android.settings.APPLICATION_DETAILS_SETTINGS".equals(intent.getAction())) {
                 intent.setData(Uri.parse("package:" + BlackBoxCore.getHostPkg()));
             }
-            if ("android.content.pm.action.REQUEST_PERMISSIONS".equals(intent.getAction())) {
-                final String[] perms = intent.getStringArrayExtra("android.content.pm.extra.REQUEST_PERMISSIONS_NAMES");
+
+            String intentAction = intent.getAction();
+            ComponentName intentComp = intent.getComponent();
+            String compClass = intentComp != null ? intentComp.getClassName() : null;
+
+            boolean isPermissionReq = false;
+            if (intentAction != null) {
+                if (intentAction.equals("android.content.pm.action.REQUEST_PERMISSIONS")
+                        || intentAction.equals("androidx.activity.result.contract.action.REQUEST_PERMISSIONS")
+                        || intentAction.endsWith(".REQUEST_PERMISSIONS")) {
+                    isPermissionReq = true;
+                }
+            }
+            if (!isPermissionReq && compClass != null) {
+                if (compClass.contains("GrantPermissionsActivity")
+                        || compClass.contains("RequestPermissionsActivity")
+                        || compClass.contains("PermissionActivity")) {
+                    isPermissionReq = true;
+                }
+            }
+            if (!isPermissionReq) {
+                if (intent.hasExtra("android.content.pm.extra.REQUEST_PERMISSIONS_NAMES")
+                        || intent.hasExtra("androidx.activity.result.contract.extra.PERMISSIONS")
+                        || intent.hasExtra("androidx.activity.result.contract.extra.PERMISSION")) {
+                    isPermissionReq = true;
+                }
+            }
+
+            if (isPermissionReq) {
+                String[] requestedPerms = null;
+                if (intent.hasExtra("android.content.pm.extra.REQUEST_PERMISSIONS_NAMES")) {
+                    requestedPerms = intent.getStringArrayExtra("android.content.pm.extra.REQUEST_PERMISSIONS_NAMES");
+                }
+                if ((requestedPerms == null || requestedPerms.length == 0) && intent.hasExtra("androidx.activity.result.contract.extra.PERMISSIONS")) {
+                    requestedPerms = intent.getStringArrayExtra("androidx.activity.result.contract.extra.PERMISSIONS");
+                }
+                if ((requestedPerms == null || requestedPerms.length == 0) && intent.hasExtra("androidx.activity.result.contract.extra.PERMISSION")) {
+                    String single = intent.getStringExtra("androidx.activity.result.contract.extra.PERMISSION");
+                    if (single != null) requestedPerms = new String[]{single};
+                }
+                if (requestedPerms == null || requestedPerms.length == 0) {
+                    Bundle extras = intent.getExtras();
+                    if (extras != null) {
+                        for (String key : extras.keySet()) {
+                            if (key != null && (key.toLowerCase().contains("permission") || key.toLowerCase().contains("perms"))) {
+                                Object val = extras.get(key);
+                                if (val instanceof String[]) {
+                                    requestedPerms = (String[]) val;
+                                    if (requestedPerms != null && requestedPerms.length > 0) break;
+                                } else if (val instanceof String) {
+                                    requestedPerms = new String[]{(String) val};
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (requestedPerms == null || requestedPerms.length == 0) {
+                    requestedPerms = new String[]{
+                        "android.permission.BLUETOOTH_CONNECT",
+                        "android.permission.BLUETOOTH_SCAN",
+                        "android.permission.BLUETOOTH_ADVERTISE",
+                        "android.permission.ACCESS_FINE_LOCATION",
+                        "android.permission.ACCESS_COARSE_LOCATION"
+                    };
+                }
+                final String[] perms = requestedPerms;
                 final IBinder rTo = StartActivityCompat.getResultTo(args);
                 final String rWho = StartActivityCompat.getResultWho(args);
                 final int reqCode = StartActivityCompat.getRequestCode(args);
-                if (perms != null && perms.length > 0) {
-                    new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
-                        @Override
-                        public void run() {
-                            try {
-                                android.app.Activity activity = null;
-                                if (rTo != null) {
-                                    activity = BActivityThread.getActivityByToken(rTo);
-                                }
-                                if (activity == null) {
+
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            android.app.Activity activity = null;
+                            if (rTo != null) {
+                                try {
+                                    java.util.Map<IBinder, Object> acts = black.android.app.BRActivityThread.get(BlackBoxCore.mainThread()).mActivities();
+                                    if (acts != null && acts.containsKey(rTo)) {
+                                        Object rec = acts.get(rTo);
+                                        if (rec != null) {
+                                            activity = black.android.app.BRActivityThreadActivityClientRecord.get(rec).activity();
+                                        }
+                                    }
+                                } catch (Throwable ignored) {}
+                            }
+                            if (activity == null) {
+                                try {
                                     java.util.Map<IBinder, Object> acts = black.android.app.BRActivityThread.get(BlackBoxCore.mainThread()).mActivities();
                                     if (acts != null && !acts.isEmpty()) {
                                         for (Object rec : acts.values()) {
+                                            if (rec == null) continue;
                                             android.app.Activity a = black.android.app.BRActivityThreadActivityClientRecord.get(rec).activity();
                                             if (a != null && !a.isFinishing()) {
                                                 activity = a;
@@ -1283,35 +1358,85 @@ replace_perm=needle_perm+'''
                                             }
                                         }
                                     }
-                                }
-                                if (activity != null) {
-                                    int[] grantResults = new int[perms.length];
-                                    for (int i = 0; i < perms.length; i++) {
-                                        grantResults[i] = android.content.pm.PackageManager.PERMISSION_GRANTED;
-                                    }
-                                    Intent resultIntent = new Intent();
-                                    resultIntent.putExtra("android.content.pm.extra.REQUEST_PERMISSIONS_NAMES", perms);
-                                    resultIntent.putExtra("android.content.pm.extra.REQUEST_PERMISSIONS_RESULTS", grantResults);
-
-                                    try {
-                                        Method dispatch = android.app.Activity.class.getDeclaredMethod("dispatchActivityResult", String.class, int.class, int.class, Intent.class);
-                                        dispatch.setAccessible(true);
-                                        dispatch.invoke(activity, rWho, reqCode, android.app.Activity.RESULT_OK, resultIntent);
-                                    } catch (Throwable t) {
-                                        try {
-                                            Method onReq = android.app.Activity.class.getDeclaredMethod("onRequestPermissionsResult", int.class, String[].class, int[].class);
-                                            onReq.setAccessible(true);
-                                            onReq.invoke(activity, reqCode, perms, grantResults);
-                                        } catch (Throwable ignored) {}
-                                    }
-                                }
-                            } catch (Throwable t) {
-                                Slog.w(TAG, "Failed to dispatch granted permission result: " + t.getMessage());
+                                } catch (Throwable ignored) {}
                             }
+                            if (activity != null) {
+                                int[] grantResults = new int[perms.length];
+                                for (int i = 0; i < perms.length; i++) {
+                                    grantResults[i] = android.content.pm.PackageManager.PERMISSION_GRANTED;
+                                }
+                                Intent resultIntent = new Intent();
+                                resultIntent.putExtra("android.content.pm.extra.REQUEST_PERMISSIONS_NAMES", perms);
+                                resultIntent.putExtra("android.content.pm.extra.REQUEST_PERMISSIONS_RESULTS", grantResults);
+                                resultIntent.putExtra("androidx.activity.result.contract.extra.PERMISSIONS", perms);
+                                resultIntent.putExtra("androidx.activity.result.contract.extra.PERMISSION_GRANT_RESULTS", grantResults);
+
+                                try {
+                                    java.lang.reflect.Field f = android.app.Activity.class.getDeclaredField("mHasCurrentPermissionsRequest");
+                                    f.setAccessible(true);
+                                    f.setBoolean(activity, false);
+                                } catch (Throwable ignored) {}
+
+                                try {
+                                    Method dispatch = android.app.Activity.class.getDeclaredMethod("dispatchActivityResult", String.class, int.class, int.class, Intent.class);
+                                    dispatch.setAccessible(true);
+                                    dispatch.invoke(activity, rWho, reqCode, android.app.Activity.RESULT_OK, resultIntent);
+                                } catch (Throwable t) {
+                                    Slog.w(TAG, "dispatchActivityResult invocation failed: " + t.getMessage());
+                                }
+
+                                try {
+                                    Method getRegistry = activity.getClass().getMethod("getActivityResultRegistry");
+                                    Object registry = getRegistry.invoke(activity);
+                                    if (registry != null) {
+                                        Method regDispatch = registry.getClass().getMethod("dispatchResult", int.class, int.class, Intent.class);
+                                        boolean dispatched = false;
+                                        if (reqCode != -1) {
+                                            try {
+                                                dispatched = (Boolean) regDispatch.invoke(registry, reqCode, android.app.Activity.RESULT_OK, resultIntent);
+                                            } catch (Throwable ignored) {}
+                                        }
+                                        if (!dispatched) {
+                                            try {
+                                                java.lang.reflect.Field rcToKeyField = null;
+                                                Class<?> cur = registry.getClass();
+                                                while (cur != null && rcToKeyField == null) {
+                                                    try {
+                                                        rcToKeyField = cur.getDeclaredField("mRcToKey");
+                                                    } catch (Throwable ex) {
+                                                        cur = cur.getSuperclass();
+                                                    }
+                                                }
+                                                if (rcToKeyField != null) {
+                                                    rcToKeyField.setAccessible(true);
+                                                    java.util.Map<?, ?> rcMap = (java.util.Map<?, ?>) rcToKeyField.get(registry);
+                                                    if (rcMap != null) {
+                                                        for (Object k : rcMap.keySet()) {
+                                                            if (k instanceof Integer) {
+                                                                regDispatch.invoke(registry, (Integer) k, android.app.Activity.RESULT_OK, resultIntent);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            } catch (Throwable ignored) {}
+                                        }
+                                    }
+                                } catch (Throwable ignored) {}
+
+                                try {
+                                    Method onReq = android.app.Activity.class.getDeclaredMethod("onRequestPermissionsResult", int.class, String[].class, int[].class);
+                                    onReq.setAccessible(true);
+                                    onReq.invoke(activity, reqCode, perms, grantResults);
+                                } catch (Throwable ignored) {}
+                            } else {
+                                Slog.w(TAG, "Could not resolve Activity to deliver permission results.");
+                            }
+                        } catch (Throwable t) {
+                            Slog.w(TAG, "Failed to dispatch granted permission result: " + t.getMessage());
                         }
-                    });
-                    return 0;
-                }
+                    }
+                });
+                return 0;
             }
             if ("com.google.android.gms.availability.ACTION_RESOLVE_ERROR".equals(intent.getAction())) {
                 Slog.d(TAG, "Blocked GMS ACTION_RESOLVE_ERROR");
