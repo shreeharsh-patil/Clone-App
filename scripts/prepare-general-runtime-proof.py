@@ -374,6 +374,13 @@ t=am_proxy.read_text(encoding='utf-8')
 t=t.replace('private static boolean isAudioPermission',bt_helper+'\n    private static boolean isAudioPermission')
 t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "ActivityManager checkPermission: Granting audio permission: " + permission);\n                return PackageManager.PERMISSION_GRANTED;\n            }',
             'if (isAudioPermission(permission) || isBluetoothPermission(permission)) {\n                Slog.d(TAG, "ActivityManager checkPermission: Granting permission: " + permission);\n                return PackageManager.PERMISSION_GRANTED;\n            }')
+needle_bind='public static Object BindServiceCommon(Object who, Method method, Object[] args,int callingPackageIndex) throws Throwable {\n        try {'
+replace_bind=needle_bind+'''
+            if (callingPackageIndex >= 0 && args != null && callingPackageIndex < args.length && args[callingPackageIndex] instanceof String) {
+                args[callingPackageIndex] = BlackBoxCore.getHostPkg();
+            }'''
+assert t.count(needle_bind)==1
+t=t.replace(needle_bind,replace_bind)
 am_proxy.write_text(t,encoding='utf-8')
 
 perm_proxy=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IPermissionManagerProxy.java'
@@ -469,6 +476,554 @@ audio_bt_hooks='''
 '''
 t=t.replace('    @ProxyMethod("abandonAudioFocus")',audio_bt_hooks+'\n    @ProxyMethod("abandonAudioFocus")')
 audio_proxy.write_text(t,encoding='utf-8')
+
+appops=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IAppOpsManagerProxy.java'
+t=appops.read_text(encoding='utf-8')
+t=t.replace('if (name != null && (name.contains("RECORD_AUDIO") || name.contains("AUDIO") || name.contains("MICROPHONE")))',
+            'if (name != null && isMediaStorageOrAudioOp(name))')
+appops.write_text(t,encoding='utf-8')
+
+act_common=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/ActivityManagerCommonProxy.java'
+t=act_common.read_text(encoding='utf-8')
+needle_perm='if (dataString != null && dataString.equals("package:" + BActivityThread.getAppPackageName())) {\n                intent.setData(Uri.parse("package:" + BlackBoxCore.getHostPkg()));\n            }'
+replace_perm=needle_perm+'''
+            if ("android.content.pm.action.REQUEST_PERMISSIONS".equals(intent.getAction())) {
+                intent.putExtra("android.content.pm.extra.REQUEST_PERMISSIONS_PACKAGE_NAME", BlackBoxCore.getHostPkg());
+            }'''
+assert t.count(needle_perm)==1
+act_common.write_text(t.replace(needle_perm,replace_perm),encoding='utf-8')
+
+bt_mgr_code='''package com.tegufy.blackbox.fake.service;
+
+import android.bluetooth.BluetoothAdapter;
+import android.os.IBinder;
+import android.os.IInterface;
+
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationHandler;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.util.Map;
+
+import black.android.os.BRServiceManager;
+import com.tegufy.blackbox.BlackBoxCore;
+import com.tegufy.blackbox.app.BActivityThread;
+import com.tegufy.blackbox.fake.hook.BinderInvocationStub;
+import com.tegufy.blackbox.fake.hook.MethodHook;
+import com.tegufy.blackbox.fake.hook.ProxyMethod;
+import com.tegufy.blackbox.utils.MethodParameterUtils;
+import com.tegufy.blackbox.utils.Slog;
+
+public class IBluetoothManagerProxy extends BinderInvocationStub {
+    public static final String TAG = "IBluetoothManagerProxy";
+
+    public IBluetoothManagerProxy() {
+        super(BRServiceManager.get().getService("bluetooth_manager"));
+    }
+
+    @Override
+    protected Object getWho() {
+        IBinder binder = BRServiceManager.get().getService("bluetooth_manager");
+        if (binder == null) {
+            return null;
+        }
+        try {
+            Class<?> stubClass = Class.forName("android.bluetooth.IBluetoothManager$Stub");
+            Method asInterfaceMethod = stubClass.getMethod("asInterface", IBinder.class);
+            return asInterfaceMethod.invoke(null, binder);
+        } catch (Throwable t) {
+            Slog.e(TAG, "Failed to get IBluetoothManager interface: " + t.getMessage(), t);
+            return null;
+        }
+    }
+
+    @Override
+    protected void inject(Object baseInvocation, Object proxyInvocation) {
+        replaceSystemService("bluetooth_manager");
+    }
+
+    @Override
+    public boolean isBadEnv() {
+        return false;
+    }
+
+    public static void sanitizeBluetoothArgs(Object[] args) {
+        if (args == null) return;
+        for (int i = 0; i < args.length; i++) {
+            Object arg = args[i];
+            if (arg == null) continue;
+            if (arg.getClass().getName().equals("android.content.AttributionSource")) {
+                fixAttributionSource(arg);
+            } else if (arg instanceof Object[]) {
+                sanitizeBluetoothArgs((Object[]) arg);
+            } else if (arg instanceof String) {
+                String str = (String) arg;
+                String guestPkg = BActivityThread.getAppPackageName();
+                if ((guestPkg != null && guestPkg.equals(str)) || BlackBoxCore.get().isInstalled(str, BlackBoxCore.getUserId())) {
+                    args[i] = BlackBoxCore.getHostPkg();
+                }
+            } else if (arg instanceof Integer) {
+                int uid = (Integer) arg;
+                if (uid == BlackBoxCore.getBUid()) {
+                    args[i] = BlackBoxCore.getHostUid();
+                }
+            }
+        }
+    }
+
+    public static void fixAttributionSource(Object attributionSource) {
+        if (attributionSource == null) return;
+        try {
+            Field stateField = attributionSource.getClass().getDeclaredField("mAttributionSourceState");
+            stateField.setAccessible(true);
+            Object state = stateField.get(attributionSource);
+            if (state != null) {
+                fixAttributionSourceState(state);
+            }
+        } catch (Throwable t) {
+            try {
+                Field pkgField = attributionSource.getClass().getDeclaredField("mPackageName");
+                pkgField.setAccessible(true);
+                pkgField.set(attributionSource, BlackBoxCore.getHostPkg());
+            } catch (Throwable ignored) {}
+            try {
+                Field uidField = attributionSource.getClass().getDeclaredField("mUid");
+                uidField.setAccessible(true);
+                uidField.set(attributionSource, BlackBoxCore.getHostUid());
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    public static void fixAttributionSourceState(Object state) {
+        if (state == null) return;
+        try {
+            Class<?> stateClass = state.getClass();
+            try {
+                Field uidField = stateClass.getField("uid");
+                uidField.setInt(state, BlackBoxCore.getHostUid());
+            } catch (Throwable ignored) {}
+
+            try {
+                Field pkgField = stateClass.getField("packageName");
+                pkgField.set(state, BlackBoxCore.getHostPkg());
+            } catch (Throwable ignored) {}
+
+            try {
+                Field nextField = stateClass.getField("next");
+                Object nextArray = nextField.get(state);
+                if (nextArray instanceof Object[]) {
+                    for (Object nextState : (Object[]) nextArray) {
+                        fixAttributionSourceState(nextState);
+                    }
+                }
+            } catch (Throwable ignored) {}
+        } catch (Throwable t) {
+            Slog.w(TAG, "Failed to fix AttributionSourceState: " + t.getMessage());
+        }
+    }
+
+    public static Object createBluetoothProxy(final Object target) {
+        if (target == null) return null;
+        Class<?>[] interfaces = MethodParameterUtils.getAllInterface(target.getClass());
+        return Proxy.newProxyInstance(target.getClass().getClassLoader(), interfaces, new InvocationHandler() {
+            @Override
+            public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+                String name = method.getName();
+                if ("asBinder".equals(name)) {
+                    if (target instanceof IInterface) {
+                        return ((IInterface) target).asBinder();
+                    }
+                    if (target instanceof IBinder) {
+                        return target;
+                    }
+                }
+                if ("equals".equals(name) && args != null && args.length == 1) {
+                    return proxy == args[0] || target.equals(args[0]);
+                }
+                if ("hashCode".equals(name) && (args == null || args.length == 0)) {
+                    return target.hashCode();
+                }
+                if ("toString".equals(name) && (args == null || args.length == 0)) {
+                    return "IBluetoothProxy$" + target.toString();
+                }
+
+                sanitizeBluetoothArgs(args);
+
+                try {
+                    Object result = method.invoke(target, args);
+                    if ("isEnabled".equals(name)) {
+                        if (result instanceof Boolean && (Boolean) result) return true;
+                        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+                        if (adapter != null && adapter.isEnabled()) return true;
+                    }
+                    if ("getState".equals(name)) {
+                        if (result instanceof Integer && (Integer) result != BluetoothAdapter.STATE_OFF) return result;
+                        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+                        if (adapter != null) return adapter.getState();
+                    }
+                    return result;
+                } catch (Throwable t) {
+                    Throwable cause = t.getCause() != null ? t.getCause() : t;
+                    Slog.w(TAG, "IBluetooth." + name + " threw exception: " + cause.getMessage());
+                    if ("isEnabled".equals(name)) {
+                        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+                        return adapter != null && adapter.isEnabled();
+                    }
+                    if ("getState".equals(name)) {
+                        BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+                        return adapter != null ? adapter.getState() : BluetoothAdapter.STATE_OFF;
+                    }
+                    if ("getBondedDevices".equals(name)) {
+                        Class<?> returnType = method.getReturnType();
+                        if (returnType.isArray()) {
+                            return java.lang.reflect.Array.newInstance(returnType.getComponentType(), 0);
+                        }
+                        return null;
+                    }
+                    Class<?> returnType = method.getReturnType();
+                    if (returnType == boolean.class || returnType == Boolean.class) return Boolean.FALSE;
+                    if (returnType == int.class || returnType == Integer.class) return 0;
+                    return null;
+                }
+            }
+        });
+    }
+
+    public static Object createBluetoothGattProxy(final Object target) {
+        if (target == null) return null;
+        Class<?>[] interfaces = MethodParameterUtils.getAllInterface(target.getClass());
+        return Proxy.newProxyInstance(target.getClass().getClassLoader(), interfaces, new InvocationHandler() {
+            @Override
+            public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+                String name = method.getName();
+                if ("asBinder".equals(name)) {
+                    if (target instanceof IInterface) {
+                        return ((IInterface) target).asBinder();
+                    }
+                    if (target instanceof IBinder) {
+                        return target;
+                    }
+                }
+                if ("equals".equals(name) && args != null && args.length == 1) {
+                    return proxy == args[0] || target.equals(args[0]);
+                }
+                if ("hashCode".equals(name) && (args == null || args.length == 0)) {
+                    return target.hashCode();
+                }
+                if ("toString".equals(name) && (args == null || args.length == 0)) {
+                    return "IBluetoothGattProxy$" + target.toString();
+                }
+
+                sanitizeBluetoothArgs(args);
+
+                try {
+                    return method.invoke(target, args);
+                } catch (Throwable t) {
+                    Throwable cause = t.getCause() != null ? t.getCause() : t;
+                    Slog.w(TAG, "IBluetoothGatt." + name + " threw: " + cause.getMessage());
+                    Class<?> returnType = method.getReturnType();
+                    if (returnType == boolean.class || returnType == Boolean.class) return Boolean.FALSE;
+                    if (returnType == int.class || returnType == Integer.class) return 0;
+                    return null;
+                }
+            }
+        });
+    }
+
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+        sanitizeBluetoothArgs(args);
+        try {
+            return super.invoke(proxy, method, args);
+        } catch (Throwable t) {
+            Throwable cause = t.getCause() != null ? t.getCause() : t;
+            String name = method.getName();
+            Slog.w(TAG, "IBluetoothManager." + name + " threw: " + cause.getMessage());
+            if ("isEnabled".equals(name)) {
+                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+                return adapter != null && adapter.isEnabled();
+            }
+            if ("getState".equals(name)) {
+                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+                return adapter != null ? adapter.getState() : BluetoothAdapter.STATE_OFF;
+            }
+            Class<?> returnType = method.getReturnType();
+            if (returnType == boolean.class || returnType == Boolean.class) return Boolean.FALSE;
+            if (returnType == int.class || returnType == Integer.class) return 0;
+            return null;
+        }
+    }
+
+    @ProxyMethod("registerAdapter")
+    public static class RegisterAdapter extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            sanitizeBluetoothArgs(args);
+            Object result = null;
+            try {
+                result = method.invoke(who, args);
+            } catch (Throwable t) {
+                Slog.w(TAG, "registerAdapter threw: " + t.getMessage());
+            }
+            if (result != null) {
+                Object proxied = createBluetoothProxy(result);
+                try {
+                    if (proxied instanceof IBinder) {
+                        Map<String, IBinder> cache = BRServiceManager.get().sCache();
+                        if (cache != null) {
+                            cache.put("bluetooth", (IBinder) proxied);
+                        }
+                    }
+                } catch (Throwable ignored) {}
+                return proxied;
+            }
+            return null;
+        }
+    }
+
+    @ProxyMethod("getBluetoothGatt")
+    public static class GetBluetoothGatt extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            sanitizeBluetoothArgs(args);
+            Object result = null;
+            try {
+                result = method.invoke(who, args);
+            } catch (Throwable t) {
+                Slog.w(TAG, "getBluetoothGatt threw: " + t.getMessage());
+            }
+            if (result != null) {
+                return createBluetoothGattProxy(result);
+            }
+            return null;
+        }
+    }
+
+    @ProxyMethod("bindBluetoothProfileService")
+    public static class BindBluetoothProfileService extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            sanitizeBluetoothArgs(args);
+            return method.invoke(who, args);
+        }
+    }
+
+    @ProxyMethod("unbindBluetoothProfileService")
+    public static class UnbindBluetoothProfileService extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            sanitizeBluetoothArgs(args);
+            return method.invoke(who, args);
+        }
+    }
+
+    @ProxyMethod("isEnabled")
+    public static class IsEnabled extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            sanitizeBluetoothArgs(args);
+            try {
+                Object result = method.invoke(who, args);
+                if (result instanceof Boolean && (Boolean) result) {
+                    return true;
+                }
+            } catch (Throwable t) {
+                Slog.w(TAG, "IBluetoothManager.isEnabled threw: " + t.getMessage());
+            }
+            try {
+                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+                if (adapter != null && adapter.isEnabled()) {
+                    return true;
+                }
+            } catch (Throwable ignored) {}
+            return false;
+        }
+    }
+
+    @ProxyMethod("getState")
+    public static class GetState extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            sanitizeBluetoothArgs(args);
+            try {
+                Object result = method.invoke(who, args);
+                if (result instanceof Integer && (Integer) result != BluetoothAdapter.STATE_OFF) {
+                    return result;
+                }
+            } catch (Throwable t) {
+                Slog.w(TAG, "IBluetoothManager.getState threw: " + t.getMessage());
+            }
+            try {
+                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+                if (adapter != null) {
+                    return adapter.getState();
+                }
+            } catch (Throwable ignored) {}
+            return BluetoothAdapter.STATE_OFF;
+        }
+    }
+
+    @ProxyMethod("enable")
+    public static class Enable extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            sanitizeBluetoothArgs(args);
+            try {
+                return method.invoke(who, args);
+            } catch (Throwable t) {
+                Slog.w(TAG, "IBluetoothManager.enable threw: " + t.getMessage());
+                try {
+                    BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+                    if (adapter != null) return adapter.enable();
+                } catch (Throwable ignored) {}
+                return false;
+            }
+        }
+    }
+
+    @ProxyMethod("disable")
+    public static class Disable extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            sanitizeBluetoothArgs(args);
+            try {
+                return method.invoke(who, args);
+            } catch (Throwable t) {
+                Slog.w(TAG, "IBluetoothManager.disable threw: " + t.getMessage());
+                try {
+                    BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+                    if (adapter != null) return adapter.disable();
+                } catch (Throwable ignored) {}
+                return false;
+            }
+        }
+    }
+}
+'''
+write(Path('runtime/src/main/java/com/tegufy/blackbox/fake/service/IBluetoothManagerProxy.java'),bt_mgr_code)
+
+bt_proxy_code='''package com.tegufy.blackbox.fake.service;
+
+import android.bluetooth.BluetoothAdapter;
+import android.os.IBinder;
+
+import java.lang.reflect.Method;
+
+import black.android.os.BRServiceManager;
+import com.tegufy.blackbox.fake.hook.BinderInvocationStub;
+import com.tegufy.blackbox.fake.hook.MethodHook;
+import com.tegufy.blackbox.fake.hook.ProxyMethod;
+import com.tegufy.blackbox.utils.Slog;
+
+public class IBluetoothProxy extends BinderInvocationStub {
+    public static final String TAG = "IBluetoothProxy";
+
+    public IBluetoothProxy() {
+        super(BRServiceManager.get().getService("bluetooth"));
+    }
+
+    @Override
+    protected Object getWho() {
+        IBinder binder = BRServiceManager.get().getService("bluetooth");
+        if (binder == null) {
+            return null;
+        }
+        try {
+            Class<?> stubClass = Class.forName("android.bluetooth.IBluetooth$Stub");
+            Method asInterfaceMethod = stubClass.getMethod("asInterface", IBinder.class);
+            return asInterfaceMethod.invoke(null, binder);
+        } catch (Throwable t) {
+            Slog.e(TAG, "Failed to get IBluetooth interface: " + t.getMessage(), t);
+            return null;
+        }
+    }
+
+    @Override
+    protected void inject(Object baseInvocation, Object proxyInvocation) {
+        replaceSystemService("bluetooth");
+    }
+
+    @Override
+    public boolean isBadEnv() {
+        return false;
+    }
+
+    @Override
+    public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+        IBluetoothManagerProxy.sanitizeBluetoothArgs(args);
+        try {
+            return super.invoke(proxy, method, args);
+        } catch (Throwable t) {
+            Throwable cause = t.getCause() != null ? t.getCause() : t;
+            String name = method.getName();
+            Slog.w(TAG, "IBluetooth." + name + " threw: " + cause.getMessage());
+            if ("isEnabled".equals(name)) {
+                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+                return adapter != null && adapter.isEnabled();
+            }
+            if ("getState".equals(name)) {
+                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+                return adapter != null ? adapter.getState() : BluetoothAdapter.STATE_OFF;
+            }
+            Class<?> returnType = method.getReturnType();
+            if (returnType == boolean.class || returnType == Boolean.class) return Boolean.FALSE;
+            if (returnType == int.class || returnType == Integer.class) return 0;
+            return null;
+        }
+    }
+
+    @ProxyMethod("isEnabled")
+    public static class IsEnabled extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            IBluetoothManagerProxy.sanitizeBluetoothArgs(args);
+            try {
+                Object result = method.invoke(who, args);
+                if (result instanceof Boolean && (Boolean) result) {
+                    return true;
+                }
+            } catch (Throwable t) {
+                Slog.w(TAG, "IBluetooth.isEnabled hook threw: " + t.getMessage());
+            }
+            try {
+                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+                if (adapter != null && adapter.isEnabled()) return true;
+            } catch (Throwable ignored) {}
+            return false;
+        }
+    }
+
+    @ProxyMethod("getState")
+    public static class GetState extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            IBluetoothManagerProxy.sanitizeBluetoothArgs(args);
+            try {
+                Object result = method.invoke(who, args);
+                if (result instanceof Integer && (Integer) result != BluetoothAdapter.STATE_OFF) {
+                    return result;
+                }
+            } catch (Throwable t) {
+                Slog.w(TAG, "IBluetooth.getState hook threw: " + t.getMessage());
+            }
+            try {
+                BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
+                if (adapter != null) return adapter.getState();
+            } catch (Throwable ignored) {}
+            return BluetoothAdapter.STATE_OFF;
+        }
+    }
+}
+'''
+write(Path('runtime/src/main/java/com/tegufy/blackbox/fake/service/IBluetoothProxy.java'),bt_proxy_code)
+
+hook_mgr=P/'runtime/src/main/java/com/tegufy/blackbox/fake/hook/HookManager.java'
+t=hook_mgr.read_text(encoding='utf-8')
+t=t.replace('import com.tegufy.blackbox.fake.service.IAudioServiceProxy;',
+            'import com.tegufy.blackbox.fake.service.IAudioServiceProxy;\nimport com.tegufy.blackbox.fake.service.IBluetoothManagerProxy;\nimport com.tegufy.blackbox.fake.service.IBluetoothProxy;')
+t=t.replace('addInjector(new IAudioServiceProxy());',
+            'addInjector(new IAudioServiceProxy());\n            addInjector(new IBluetoothManagerProxy());\n            addInjector(new IBluetoothProxy());')
+hook_mgr.write_text(t,encoding='utf-8')
 
 # Runtime licenses accompany the generated source and the experimental APK.
 notices=['Experimental Clone Apps runtime: locally adapted sources, not an upstream APK.',

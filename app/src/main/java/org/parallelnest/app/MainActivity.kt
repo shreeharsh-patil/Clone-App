@@ -47,9 +47,32 @@ class MainActivity: ComponentActivity() {
         runCatching { startActivity(Intent.createChooser(fileShareIntent(it,contentResolver.getType(it) ?: "application/octet-stream"),"Send selected file · choose Bluetooth")) }
             .onFailure { vm.report(it.message ?: "Android file sharing is unavailable") }
     } }
+    private val startupPermissions=registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        vm.refresh()
+    }
+    private fun requestStartupPermissions() {
+        val permissionsToRequest = mutableListOf<String>()
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(android.Manifest.permission.BLUETOOTH_CONNECT)
+            }
+            if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(android.Manifest.permission.BLUETOOTH_SCAN)
+            }
+        }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                permissionsToRequest.add(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+        if (permissionsToRequest.isNotEmpty()) {
+            startupPermissions.launch(permissionsToRequest.toTypedArray())
+        }
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        requestStartupPermissions()
         setContent {
             val state by vm.state.collectAsStateWithLifecycle()
             val dark=state.theme!="system" || isSystemInDarkTheme()

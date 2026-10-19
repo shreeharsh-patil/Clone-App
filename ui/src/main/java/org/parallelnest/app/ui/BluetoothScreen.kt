@@ -35,7 +35,7 @@ import org.parallelnest.app.bluetooth.BluetoothController
     }
     val connectPermissions = remember {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            arrayOf(Manifest.permission.BLUETOOTH_CONNECT)
+            arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN)
         } else {
             emptyArray()
         }
