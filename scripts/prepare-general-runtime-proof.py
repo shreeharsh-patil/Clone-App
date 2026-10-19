@@ -92,6 +92,7 @@ standard_permissions = {
     'android.permission.READ_MEDIA_AUDIO', 'android.permission.READ_MEDIA_VIDEO',
     'android.permission.READ_MEDIA_IMAGES', 'android.permission.POST_NOTIFICATIONS',
     'android.permission.VIBRATE', 'android.permission.BLUETOOTH',
+    'android.permission.BLUETOOTH_ADMIN', 'android.permission.BLUETOOTH_ADVERTISE',
     'android.permission.BLUETOOTH_CONNECT', 'android.permission.BLUETOOTH_SCAN',
     'android.permission.READ_CONTACTS', 'android.permission.WRITE_CONTACTS',
     'android.permission.READ_PHONE_STATE', 'android.permission.CALL_PHONE',
@@ -345,6 +346,129 @@ t=t.replace('if (ComponentUtils.intentFilterEquals(topActivityRecord.intent, int
 t=t.replace('return startActivityInSourceTask(intent,',
     'if (topActivityRecord == null) return startActivityInNewTaskLocked(userId, intent, activityInfo, resultTo, launchModeFlags);\n        return startActivityInSourceTask(intent,')
 stack.write_text(t,encoding='utf-8')
+
+# Bluetooth and permission runtime patches for guest applications (WhatsApp, calls, audio accessories)
+bt_helper='''
+    private static boolean isBluetoothPermission(String permission) {
+        if (permission == null) return false;
+        return permission.equals("android.permission.BLUETOOTH")
+                || permission.equals("android.permission.BLUETOOTH_ADMIN")
+                || permission.equals("android.permission.BLUETOOTH_CONNECT")
+                || permission.equals("android.permission.BLUETOOTH_SCAN")
+                || permission.equals("android.permission.BLUETOOTH_ADVERTISE");
+    }
+'''
+pm_proxy=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IPackageManagerProxy.java'
+t=pm_proxy.read_text(encoding='utf-8')
+t=t.replace('private static boolean isStorageOrMediaPermission',bt_helper+'\n    private static boolean isStorageOrMediaPermission')
+t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "SimpleAudioPermissionHook: Granting audio permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }',
+            'if (isAudioPermission(permission) || isBluetoothPermission(permission)) {\n                Slog.d(TAG, "SimpleAudioPermissionHook: Granting permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }')
+t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "CheckSelfPermission: Granting audio permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }',
+            'if (isAudioPermission(permission) || isBluetoothPermission(permission)) {\n                Slog.d(TAG, "CheckSelfPermission: Granting permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }')
+t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "ShouldShowRequestPermissionRationale: Not showing rationale for audio permission: " + permission);\n                return false;\n            }',
+            'if (isAudioPermission(permission) || isBluetoothPermission(permission)) {\n                Slog.d(TAG, "ShouldShowRequestPermissionRationale: Not showing rationale for permission: " + permission);\n                return false;\n            }')
+pm_proxy.write_text(t,encoding='utf-8')
+
+am_proxy=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IActivityManagerProxy.java'
+t=am_proxy.read_text(encoding='utf-8')
+t=t.replace('private static boolean isAudioPermission',bt_helper+'\n    private static boolean isAudioPermission')
+t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "ActivityManager checkPermission: Granting audio permission: " + permission);\n                return PackageManager.PERMISSION_GRANTED;\n            }',
+            'if (isAudioPermission(permission) || isBluetoothPermission(permission)) {\n                Slog.d(TAG, "ActivityManager checkPermission: Granting permission: " + permission);\n                return PackageManager.PERMISSION_GRANTED;\n            }')
+am_proxy.write_text(t,encoding='utf-8')
+
+perm_proxy=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IPermissionManagerProxy.java'
+t=perm_proxy.read_text(encoding='utf-8')
+t=t.replace('import com.tegufy.blackbox.fake.hook.BinderInvocationStub;',
+            'import com.tegufy.blackbox.fake.hook.BinderInvocationStub;\nimport com.tegufy.blackbox.fake.hook.MethodHook;')
+perm_check_hooks='''        addMethodHook("checkPermission", new MethodHook() {
+            @Override
+            protected Object hook(Object who, java.lang.reflect.Method method, Object[] args) throws Throwable {
+                if (args != null && args.length > 0 && args[0] instanceof String) {
+                    String permission = (String) args[0];
+                    if (isAllowedPermission(permission)) {
+                        return PackageManager.PERMISSION_GRANTED;
+                    }
+                }
+                com.tegufy.blackbox.utils.MethodParameterUtils.replaceFirstAppPkg(args);
+                return method.invoke(who, args);
+            }
+        });
+        addMethodHook("checkUidPermission", new MethodHook() {
+            @Override
+            protected Object hook(Object who, java.lang.reflect.Method method, Object[] args) throws Throwable {
+                if (args != null && args.length > 1 && args[1] instanceof String) {
+                    String permission = (String) args[1];
+                    if (isAllowedPermission(permission)) {
+                        return PackageManager.PERMISSION_GRANTED;
+                    }
+                }
+                com.tegufy.blackbox.utils.MethodParameterUtils.replaceLastUid(args);
+                return method.invoke(who, args);
+            }
+        });
+'''
+allowed_helper='''
+    private static boolean isAllowedPermission(String permission) {
+        if (permission == null) return false;
+        return permission.startsWith("android.permission.BLUETOOTH")
+                || permission.equals(android.Manifest.permission.RECORD_AUDIO)
+                || permission.equals(android.Manifest.permission.MODIFY_AUDIO_SETTINGS)
+                || permission.equals(android.Manifest.permission.CAMERA)
+                || permission.equals(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+                || permission.equals(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                || permission.startsWith("android.permission.READ_MEDIA_")
+                || permission.equals("android.permission.POST_NOTIFICATIONS")
+                || permission.startsWith("android.permission.FOREGROUND_SERVICE");
+    }
+'''
+t=t.replace('addMethodHook(new PkgMethodProxy("shouldShowRequestPermissionRationale"));',
+            'addMethodHook(new PkgMethodProxy("shouldShowRequestPermissionRationale"));\n'+perm_check_hooks)
+t=t.replace('@Override\n    public boolean isBadEnv()',allowed_helper+'\n    @Override\n    public boolean isBadEnv()')
+perm_proxy.write_text(t,encoding='utf-8')
+
+audio_proxy=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IAudioServiceProxy.java'
+t=audio_proxy.read_text(encoding='utf-8')
+audio_bt_hooks='''
+    @ProxyMethod("startBluetoothSco")
+    public static class StartBluetoothSco extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            Slog.d(TAG, "AudioService: startBluetoothSco called");
+            com.tegufy.blackbox.utils.MethodParameterUtils.replaceFirstAppPkg(args);
+            return method.invoke(who, args);
+        }
+    }
+
+    @ProxyMethod("stopBluetoothSco")
+    public static class StopBluetoothSco extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            Slog.d(TAG, "AudioService: stopBluetoothSco called");
+            com.tegufy.blackbox.utils.MethodParameterUtils.replaceFirstAppPkg(args);
+            return method.invoke(who, args);
+        }
+    }
+
+    @ProxyMethod("setBluetoothScoOn")
+    public static class SetBluetoothScoOn extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            Slog.d(TAG, "AudioService: setBluetoothScoOn called");
+            return method.invoke(who, args);
+        }
+    }
+
+    @ProxyMethod("setBluetoothA2dpOn")
+    public static class SetBluetoothA2dpOn extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            Slog.d(TAG, "AudioService: setBluetoothA2dpOn called");
+            return method.invoke(who, args);
+        }
+    }
+'''
+t=t.replace('    @ProxyMethod("abandonAudioFocus")',audio_bt_hooks+'\n    @ProxyMethod("abandonAudioFocus")')
+audio_proxy.write_text(t,encoding='utf-8')
 
 # Runtime licenses accompany the generated source and the experimental APK.
 notices=['Experimental Clone Apps runtime: locally adapted sources, not an upstream APK.',

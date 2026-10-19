@@ -19,7 +19,7 @@ data class NearbyDevice(val address: String, val name: String, val bond: Int) {
     }
 }
 data class BluetoothState(val supported: Boolean = false, val permitted: Boolean = false, val scanPermitted: Boolean = false, val enabled: Boolean = false,
-                          val scanning: Boolean = false, val devices: List<NearbyDevice> = emptyList(), val message: String? = null)
+                          val turningOn: Boolean = false, val scanning: Boolean = false, val devices: List<NearbyDevice> = emptyList(), val message: String? = null)
 
 /** Foreground, user-requested classic discovery. No service, polling, persistence or device uploads. */
 class BluetoothController(private val context: Context) {
@@ -31,8 +31,29 @@ class BluetoothController(private val context: Context) {
     private var ownsDiscovery = false
     private val scope = CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
     private var deadline: Job? = null
-    fun hasPermission() = context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)==PackageManager.PERMISSION_GRANTED
-    fun hasScanPermission() = context.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN)==PackageManager.PERMISSION_GRANTED
+    private var pollingJob: Job? = null
+
+    fun hasPermission(): Boolean {
+        if (adapter == null) return false
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
+        } else {
+            context.checkSelfPermission(Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    fun hasScanPermission(): Boolean {
+        if (adapter == null) return false
+        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            context.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
+        } else {
+            val admin = context.checkSelfPermission(Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED
+            val location = context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+                context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+            admin && location
+        }
+    }
+
     private val receiver = object: BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when(intent.action) {
@@ -49,10 +70,36 @@ class BluetoothController(private val context: Context) {
                     mutable.update { it.copy(scanning=false,message="Scan finished. Only discoverable classic Bluetooth devices appear here.") }
                     refresh()
                 }
-                BluetoothAdapter.ACTION_STATE_CHANGED, BluetoothDevice.ACTION_BOND_STATE_CHANGED -> refresh()
+                BluetoothAdapter.ACTION_STATE_CHANGED -> {
+                    val stateExtra = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
+                    when (stateExtra) {
+                        BluetoothAdapter.STATE_TURNING_ON -> {
+                            mutable.update { it.copy(turningOn = true, message = "Turning on Bluetooth…") }
+                            startPollingForState()
+                        }
+                        BluetoothAdapter.STATE_ON -> {
+                            pollingJob?.cancel()
+                            mutable.update { it.copy(turningOn = false, enabled = true, message = null) }
+                            refresh()
+                        }
+                        BluetoothAdapter.STATE_TURNING_OFF -> {
+                            stopScan()
+                            mutable.update { it.copy(turningOn = false, enabled = false, message = "Turning off Bluetooth…") }
+                        }
+                        BluetoothAdapter.STATE_OFF -> {
+                            pollingJob?.cancel()
+                            stopScan()
+                            mutable.update { it.copy(turningOn = false, enabled = false, message = null) }
+                            refresh()
+                        }
+                        else -> refresh()
+                    }
+                }
+                BluetoothDevice.ACTION_BOND_STATE_CHANGED -> refresh()
             }
         }
     }
+
     fun startObserving() {
         if(!registered) {
             // Bluetooth broadcasts originate from a privileged Bluetooth UID,
@@ -65,21 +112,85 @@ class BluetoothController(private val context: Context) {
         }
         refresh()
     }
+
     @SuppressLint("MissingPermission")
     private fun entry(device: BluetoothDevice) = NearbyDevice(device.address,device.name?.take(120) ?: "Unnamed device",device.bondState)
+
     @SuppressLint("MissingPermission")
     fun refresh() {
-        if(!hasPermission()) { mutable.update { it.copy(permitted=false,scanPermitted=hasScanPermission(),enabled=false,devices=emptyList(),scanning=false) };return }
+        val hwEnabled = runCatching { adapter?.isEnabled == true }.getOrDefault(false)
+        val stateCode = runCatching { adapter?.state }.getOrNull()
+        val isTurningOn = stateCode == BluetoothAdapter.STATE_TURNING_ON
+        if(!hasPermission()) {
+            mutable.update {
+                it.copy(
+                    permitted = false,
+                    scanPermitted = hasScanPermission(),
+                    enabled = hwEnabled,
+                    turningOn = isTurningOn,
+                    devices = emptyList(),
+                    scanning = false
+                )
+            }
+            return
+        }
         runCatching {
-            val enabled=adapter?.isEnabled==true
-            if(!enabled) stopScan()
-            val devices=if(enabled) {
-                val paired=adapter!!.bondedDevices.associate { it.address to entry(it) }
-                found.mapValues { (address,value) -> value.copy(bond=adapter.getRemoteDevice(address).bondState) } + paired
+            val enabled = hwEnabled || stateCode == BluetoothAdapter.STATE_ON
+            if(!enabled && !isTurningOn) stopScan()
+            val devices = if(enabled) {
+                val paired = adapter?.bondedDevices?.associate { it.address to entry(it) } ?: emptyMap()
+                found.mapValues { (address,value) ->
+                    val remoteBond = runCatching { adapter?.getRemoteDevice(address)?.bondState }.getOrNull() ?: value.bond
+                    value.copy(bond = remoteBond)
+                } + paired
             } else emptyMap()
-            mutable.update { it.copy(permitted=true,scanPermitted=hasScanPermission(),enabled=enabled,devices=devices.values.sortedWith(compareByDescending<NearbyDevice>{it.bond==BluetoothDevice.BOND_BONDED}.thenBy{it.name.lowercase()})) }
+            mutable.update {
+                it.copy(
+                    permitted = true,
+                    scanPermitted = hasScanPermission(),
+                    enabled = enabled,
+                    turningOn = isTurningOn,
+                    devices = devices.values.sortedWith(compareByDescending<NearbyDevice>{it.bond==BluetoothDevice.BOND_BONDED}.thenBy{it.name.lowercase()})
+                )
+            }
         }.onFailure { mutable.update { s -> s.copy(message="Bluetooth state unavailable: ${it.message}") } }
     }
+
+    fun onEnableRequested() {
+        mutable.update { it.copy(turningOn = true, message = "Turning on Bluetooth…") }
+        startPollingForState()
+    }
+
+    fun onEnableResult(accepted: Boolean) {
+        if (accepted) {
+            mutable.update { it.copy(turningOn = true, message = "Turning on Bluetooth…") }
+            startPollingForState()
+        } else {
+            refresh()
+            if (adapter?.isEnabled != true) {
+                mutable.update { it.copy(turningOn = false, message = "Could not turn on Bluetooth. Please enable it in Bluetooth settings.") }
+            }
+        }
+    }
+
+    private fun startPollingForState() {
+        pollingJob?.cancel()
+        pollingJob = scope.launch {
+            for (i in 0 until 20) {
+                delay(300)
+                val state = runCatching { adapter?.state }.getOrNull()
+                val isNowOn = adapter?.isEnabled == true || state == BluetoothAdapter.STATE_ON
+                if (isNowOn) {
+                    refresh()
+                    mutable.update { it.copy(turningOn = false, enabled = true, message = null) }
+                    return@launch
+                }
+            }
+            refresh()
+            mutable.update { it.copy(turningOn = false) }
+        }
+    }
+
     @SuppressLint("MissingPermission")
     fun scan() {
         if(!hasPermission() || !hasScanPermission()) { refresh();return }
@@ -94,6 +205,7 @@ class BluetoothController(private val context: Context) {
             deadline=scope.launch { delay(15_000); stopScan();mutable.update { it.copy(message="Scan finished. Make the other device discoverable and scan again if needed.") } }
         }.onFailure { mutable.update { s -> s.copy(message=it.message ?: "Discovery failed",scanning=false) } }
     }
+
     @SuppressLint("MissingPermission")
     fun stopScan() {
         deadline?.cancel();deadline=null
@@ -102,6 +214,7 @@ class BluetoothController(private val context: Context) {
         ownsDiscovery=false
         mutable.update { it.copy(scanning=false,message=if(wasScanning) "Scan stopped" else it.message) }
     }
+
     @SuppressLint("MissingPermission")
     fun pair(address: String) {
         if(!hasPermission()) { refresh();return }
@@ -115,10 +228,13 @@ class BluetoothController(private val context: Context) {
             refresh()
         }.onFailure { mutable.update { s -> s.copy(message=it.message ?: "Pairing failed") } }
     }
+
     fun stopObserving() {
         stopScan()
+        pollingJob?.cancel()
         if(registered) { context.unregisterReceiver(receiver);registered=false }
     }
+
     fun dispose() { stopObserving();scope.cancel() }
 }
 
