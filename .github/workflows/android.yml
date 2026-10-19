@@ -30,6 +30,8 @@ jobs:
         run: cargo test --manifest-path rust-core/Cargo.toml --locked
       - name: Build both native ABIs
         run: bash scripts/build-rust.sh
+      - name: Prepare general runtime proof
+        run: python3 scripts/prepare-general-runtime-proof.py
       - name: Virtual runtime, Kotlin tests, lint and APKs
         run: |
           chmod +x gradlew
@@ -68,7 +70,9 @@ jobs:
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
-      - run: sdkmanager 'platforms;android-36' 'ndk;27.1.12297006'
+      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006'
+      - name: Prepare general runtime proof
+        run: python3 scripts/prepare-general-runtime-proof.py
       - run: rustup show && bash scripts/build-rust.sh && chmod +x gradlew && ./gradlew :isolation-probe:assembleDebug
       - name: Enable KVM for emulator
         run: |

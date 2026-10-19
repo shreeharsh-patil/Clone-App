@@ -56,10 +56,12 @@ config.write_text(config.read_text(encoding='utf-8').replace('new JarDefinition[
 # Generate the small bootstrap dex from its accompanying Java source, rather than
 # accepting the upstream's opaque base64 payload. Also generate the dummy dex asset.
 sdk=Path(os.environ['ANDROID_HOME']); jdk=Path(os.environ['JAVA_HOME'])
+javac_bin = str(jdk / 'bin' / ('javac.exe' if os.name == 'nt' else 'javac'))
+d8_bin = str(sdk / 'build-tools' / '36.0.0' / ('d8.bat' if os.name == 'nt' else 'd8'))
 classes=P/'bootstrap-classes'; dex=P/'bootstrap-dex'; classes.mkdir(exist_ok=True); dex.mkdir(exist_ok=True)
 source=P/'free-reflection/src/main/java/me/weishu/reflection/BootstrapClass.java'
-subprocess.run([str(jdk/'bin/javac.exe'),'-source','8','-target','8','-classpath',str(sdk/'platforms/android-36/android.jar'),'-d',str(classes),str(source)],check=True)
-subprocess.run([str(sdk/'build-tools/36.0.0/d8.bat'),'--min-api','33','--lib',str(sdk/'platforms/android-36/android.jar'),'--output',str(dex),str(classes/'me/weishu/reflection/BootstrapClass.class')],check=True)
+subprocess.run([javac_bin,'-source','8','-target','8','-classpath',str(sdk/'platforms/android-36/android.jar'),'-d',str(classes),str(source)],check=True)
+subprocess.run([d8_bin,'--min-api','33','--lib',str(sdk/'platforms/android-36/android.jar'),'--output',str(dex),str(classes/'me/weishu/reflection/BootstrapClass.class')],check=True)
 reflection=P/'free-reflection/src/main/java/me/weishu/reflection/Reflection.java'
 t=reflection.read_text(encoding='utf-8'); t=re.sub(r'private static final String DEX = "[^"]+";', 'private static final String DEX = "'+base64.b64encode((dex/'classes.dex').read_bytes()).decode()+'";',t)
 t=t.replace('fos.write(bytes);','code.setReadOnly();\n                fos.write(bytes);')
@@ -71,8 +73,8 @@ t=t.replace('if (unsealByDexFile(context)) {','if (unsealByDexFile(context)) {\n
 reflection.write_text(t,encoding='utf-8')
 write(Path('marker/Empty.java'),'package org.parallelnest.runtimeproof; public final class Empty {}')
 emptyclasses=P/'marker/classes'; emptydex=P/'marker/dex'; emptyclasses.mkdir(parents=True,exist_ok=True); emptydex.mkdir(exist_ok=True)
-subprocess.run([str(jdk/'bin/javac.exe'),'-source','8','-target','8','-d',str(emptyclasses),str(P/'marker/Empty.java')],check=True)
-subprocess.run([str(sdk/'build-tools/36.0.0/d8.bat'),'--min-api','33','--output',str(emptydex),str(emptyclasses/'org/parallelnest/runtimeproof/Empty.class')],check=True)
+subprocess.run([javac_bin,'-source','8','-target','8','-d',str(emptyclasses),str(P/'marker/Empty.java')],check=True)
+subprocess.run([d8_bin,'--min-api','33','--output',str(emptydex),str(emptyclasses/'org/parallelnest/runtimeproof/Empty.class')],check=True)
 assets=P/'runtime/src/main/assets'; assets.mkdir(parents=True,exist_ok=True)
 with zipfile.ZipFile(assets/'empty.jar','w') as z: z.write(emptydex/'classes.dex','classes.dex')
 
@@ -144,6 +146,7 @@ android {
  externalNativeBuild { cmake { path 'src/main/cpp/CMakeLists.txt'; version '3.22.1' } }
 }
 tasks.withType(JavaCompile).configureEach {
+ options.encoding = 'UTF-8'
  doFirst {
   fileTree("$buildDir/generated/aidl_source_output_dir").matching { include '**/*.java' }.each { f ->
    def text=f.getText('UTF-8'); f.setText(text.replaceFirst('(?s)^/\\\\*.*?\\\\*/','/* Generated from the source AIDL. */'),'UTF-8')
@@ -404,17 +407,25 @@ bt_helper='''
             return method.invoke(who, args);
         }
     }
+
+    @ProxyMethod("getPermissionFlags")
+    public static class GetPermissionFlags extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return 0;
+        }
+    }
 '''
 pm_proxy=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IPackageManagerProxy.java'
 t=pm_proxy.read_text(encoding='utf-8')
 t=t.replace('private static boolean isStorageOrMediaPermission',bt_helper+'\n    private static boolean isStorageOrMediaPermission')
-t=t.replace('addMethodHook(new RequestPermissions());', 'addMethodHook(new RequestPermissions());\n        addMethodHook(new CheckUidPermission());')
+t=t.replace('addMethodHook(new RequestPermissions());', 'addMethodHook(new RequestPermissions());\n        addMethodHook(new CheckUidPermission());\n        addMethodHook(new GetPermissionFlags());')
 t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "SimpleAudioPermissionHook: Granting audio permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }',
             'if (isAudioPermission(permission) || isBluetoothPermission(permission) || isStorageOrMediaPermission(permission) || isNotificationOrXiaomiPermission(permission)) {\n                Slog.d(TAG, "SimpleAudioPermissionHook: Granting permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }')
 t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "CheckSelfPermission: Granting audio permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }',
             'if (isAudioPermission(permission) || isBluetoothPermission(permission) || isStorageOrMediaPermission(permission) || isNotificationOrXiaomiPermission(permission)) {\n                Slog.d(TAG, "CheckSelfPermission: Granting permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }')
 t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "ShouldShowRequestPermissionRationale: Not showing rationale for audio permission: " + permission);\n                return false;\n            }',
-            'if (isAudioPermission(permission) || isBluetoothPermission(permission) || isStorageOrMediaPermission(permission) || isNotificationOrXiaomiPermission(permission)) {\n                Slog.d(TAG, "ShouldShowRequestPermissionRationale: Not showing rationale for permission: " + permission);\n                return false;\n            }')
+            'if (isAudioPermission(permission) || isBluetoothPermission(permission) || isStorageOrMediaPermission(permission) || isNotificationOrXiaomiPermission(permission)) {\n                Slog.d(TAG, "ShouldShowRequestPermissionRationale: Returning rationale for permission: " + permission);\n                return true;\n            }')
 
 pkg_info_old='''            if ("com.android.vending".equals(packageName)) {
                 return createFakeGooglePlayServicesPackageInfo();
@@ -541,9 +552,138 @@ replace_hook(pm_proxy, 'GetApplicationInfo', '''            String packageName =
 
 am_proxy=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/IActivityManagerProxy.java'
 t=am_proxy.read_text(encoding='utf-8')
-t=t.replace('private static boolean isAudioPermission',bt_helper+'\n    private static boolean isAudioPermission')
-t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "ActivityManager checkPermission: Granting audio permission: " + permission);\n                return PackageManager.PERMISSION_GRANTED;\n            }',
-            'if (isAudioPermission(permission) || isBluetoothPermission(permission)) {\n                Slog.d(TAG, "ActivityManager checkPermission: Granting permission: " + permission);\n                return PackageManager.PERMISSION_GRANTED;\n            }')
+old_check_perm='''    @ProxyMethod("checkPermission")
+    public static class checkPermission extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            MethodParameterUtils.replaceLastUid(args);
+            String permission = (String) args[0];
+            if (permission.equals(Manifest.permission.ACCOUNT_MANAGER)
+                    || permission.equals(Manifest.permission.SEND_SMS)) {
+                return PackageManager.PERMISSION_GRANTED;
+            }
+            
+            
+            if (isAudioPermission(permission)) {
+                Slog.d(TAG, "ActivityManager checkPermission: Granting audio permission: " + permission);
+                return PackageManager.PERMISSION_GRANTED;
+            }
+
+            
+            if (isStorageOrMediaPermission(permission)) {
+                Slog.d(TAG, "ActivityManager checkPermission: Granting storage/media permission: " + permission);
+                return PackageManager.PERMISSION_GRANTED;
+            }
+            
+            return method.invoke(who, args);
+        }
+    }'''
+
+am_bt_helper='''    private static boolean isBluetoothPermission(String permission) {
+        if (permission == null) return false;
+        return permission.startsWith("android.permission.BLUETOOTH")
+                || permission.startsWith("android.permission.ACCESS_")
+                || permission.startsWith("android.permission.READ_MEDIA_")
+                || permission.startsWith("android.permission.FOREGROUND_SERVICE")
+                || permission.startsWith("android.permission.BODY_SENSORS")
+                || permission.equals(android.Manifest.permission.CAMERA)
+                || permission.equals("android.permission.FOREGROUND_SERVICE_CAMERA")
+                || permission.equals(android.Manifest.permission.RECORD_AUDIO)
+                || permission.equals(android.Manifest.permission.MODIFY_AUDIO_SETTINGS)
+                || permission.equals(android.Manifest.permission.READ_EXTERNAL_STORAGE)
+                || permission.equals(android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+                || permission.equals("android.permission.READ_MEDIA_VISUAL")
+                || permission.equals("android.permission.POST_NOTIFICATIONS")
+                || permission.equals("android.permission.NEARBY_WIFI_DEVICES")
+                || permission.equals("android.permission.ACTIVITY_RECOGNITION")
+                || permission.equals(android.Manifest.permission.VIBRATE)
+                || permission.equals(android.Manifest.permission.WAKE_LOCK)
+                || permission.equals(android.Manifest.permission.READ_CONTACTS)
+                || permission.equals(android.Manifest.permission.WRITE_CONTACTS)
+                || permission.equals(android.Manifest.permission.READ_PHONE_STATE)
+                || permission.equals(android.Manifest.permission.CALL_PHONE);
+    }
+'''
+
+new_perm_hooks='''    @ProxyMethod("checkPermission")
+    public static class checkPermission extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            String permission = null;
+            if (args != null) {
+                for (Object arg : args) {
+                    if (arg instanceof String) {
+                        permission = (String) arg;
+                        break;
+                    }
+                }
+            }
+            if (permission != null && (isBluetoothPermission(permission)
+                    || permission.equals(Manifest.permission.ACCOUNT_MANAGER)
+                    || permission.equals(Manifest.permission.SEND_SMS)
+                    || isAudioPermission(permission)
+                    || isStorageOrMediaPermission(permission))) {
+                return PackageManager.PERMISSION_GRANTED;
+            }
+            MethodParameterUtils.replaceLastUid(args);
+            return method.invoke(who, args);
+        }
+    }
+
+    @ProxyMethod("checkPermissionWithToken")
+    public static class CheckPermissionWithToken extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            String permission = null;
+            if (args != null) {
+                for (Object arg : args) {
+                    if (arg instanceof String) {
+                        permission = (String) arg;
+                        break;
+                    }
+                }
+            }
+            if (permission != null && (isBluetoothPermission(permission)
+                    || permission.equals(Manifest.permission.ACCOUNT_MANAGER)
+                    || permission.equals(Manifest.permission.SEND_SMS)
+                    || isAudioPermission(permission)
+                    || isStorageOrMediaPermission(permission))) {
+                return PackageManager.PERMISSION_GRANTED;
+            }
+            MethodParameterUtils.replaceLastUid(args);
+            return method.invoke(who, args);
+        }
+    }
+
+    @ProxyMethod("checkUidPermission")
+    public static class CheckUidPermission extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            String permission = null;
+            if (args != null) {
+                for (Object arg : args) {
+                    if (arg instanceof String) {
+                        permission = (String) arg;
+                        break;
+                    }
+                }
+            }
+            if (permission != null && (isBluetoothPermission(permission)
+                    || permission.equals(Manifest.permission.ACCOUNT_MANAGER)
+                    || permission.equals(Manifest.permission.SEND_SMS)
+                    || isAudioPermission(permission)
+                    || isStorageOrMediaPermission(permission))) {
+                return PackageManager.PERMISSION_GRANTED;
+            }
+            MethodParameterUtils.replaceLastUid(args);
+            return method.invoke(who, args);
+        }
+    }'''
+
+assert t.count(old_check_perm) == 1
+t=t.replace(old_check_perm, am_bt_helper + '\n' + new_perm_hooks)
+t=t.replace('addMethodHook(new PkgMethodProxy("reportJunkFromApp"));',
+            'addMethodHook(new PkgMethodProxy("reportJunkFromApp"));\n        addMethodHook(new CheckPermissionWithToken());\n        addMethodHook(new CheckUidPermission());')
 
 cp_old='''                if (BuildCompat.isQ()) {
                     args[1] = BlackBoxCore.getHostPkg();
@@ -864,6 +1004,18 @@ perm_check_hooks='''        addMethodHook("checkPermission", new MethodHook() {
                 return method.invoke(who, args);
             }
         });
+        addMethodHook("getPermissionFlags", new MethodHook() {
+            @Override
+            protected Object hook(Object who, java.lang.reflect.Method method, Object[] args) throws Throwable {
+                return 0;
+            }
+        });
+        addMethodHook("shouldShowRequestPermissionRationale", new MethodHook() {
+            @Override
+            protected Object hook(Object who, java.lang.reflect.Method method, Object[] args) throws Throwable {
+                return true;
+            }
+        });
 '''
 allowed_helper='''
     private static boolean isAllowedPermission(String permission) {
@@ -891,8 +1043,7 @@ allowed_helper='''
                 || permission.equals(android.Manifest.permission.CALL_PHONE);
     }
 '''
-t=t.replace('addMethodHook(new PkgMethodProxy("shouldShowRequestPermissionRationale"));',
-            'addMethodHook(new PkgMethodProxy("shouldShowRequestPermissionRationale"));\n'+perm_check_hooks)
+t=t.replace('addMethodHook(new PkgMethodProxy("shouldShowRequestPermissionRationale"));', perm_check_hooks)
 t=t.replace('@Override\n    public boolean isBadEnv()',allowed_helper+'\n    @Override\n    public boolean isBadEnv()')
 perm_proxy.write_text(t,encoding='utf-8')
 
@@ -1103,6 +1254,10 @@ act_common=P/'runtime/src/main/java/com/tegufy/blackbox/fake/service/ActivityMan
 t=act_common.read_text(encoding='utf-8')
 needle_perm='if (dataString != null && dataString.equals("package:" + BActivityThread.getAppPackageName())) {\n                intent.setData(Uri.parse("package:" + BlackBoxCore.getHostPkg()));\n            }'
 replace_perm=needle_perm+'''
+            if (android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS.equals(intent.getAction())
+                    || "android.settings.APPLICATION_DETAILS_SETTINGS".equals(intent.getAction())) {
+                intent.setData(Uri.parse("package:" + BlackBoxCore.getHostPkg()));
+            }
             if ("android.content.pm.action.REQUEST_PERMISSIONS".equals(intent.getAction())) {
                 final String[] perms = intent.getStringArrayExtra("android.content.pm.extra.REQUEST_PERMISSIONS_NAMES");
                 final IBinder rTo = StartActivityCompat.getResultTo(args);

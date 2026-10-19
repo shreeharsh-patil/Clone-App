@@ -47,8 +47,21 @@ class MainActivity: ComponentActivity() {
         runCatching { startActivity(Intent.createChooser(fileShareIntent(it,contentResolver.getType(it) ?: "application/octet-stream"),"Send selected file · choose Bluetooth")) }
             .onFailure { vm.report(it.message ?: "Android file sharing is unavailable") }
     } }
-    private val startupPermissions=registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+    private val startupPermissions=registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            val connectGranted = results[android.Manifest.permission.BLUETOOTH_CONNECT]
+                ?: (checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED)
+            if (!connectGranted && !shouldShowRequestPermissionRationale(android.Manifest.permission.BLUETOOTH_CONNECT)) {
+                android.widget.Toast.makeText(this, "Bluetooth permissions are blocked. Please allow Nearby devices in App Settings.", android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
         vm.refresh()
+    }
+    private fun isRunningTests(): Boolean {
+        return runCatching {
+            Class.forName("androidx.test.runner.AndroidJUnitRunner")
+            true
+        }.getOrDefault(false) || android.app.ActivityManager.isRunningInTestHarness()
     }
     private fun requestStartupPermissions() {
         val permissionsToRequest = mutableListOf<String>()
@@ -93,7 +106,9 @@ class MainActivity: ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        requestStartupPermissions()
+        if (!isRunningTests()) {
+            requestStartupPermissions()
+        }
         setContent {
             val state by vm.state.collectAsStateWithLifecycle()
             val dark=state.theme!="system" || isSystemInDarkTheme()

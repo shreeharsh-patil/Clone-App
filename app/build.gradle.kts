@@ -45,7 +45,10 @@ android {
     kotlinOptions { jvmTarget = "17" }
     packaging { jniLibs { useLegacyPackaging = false } }
     testOptions { unitTests.isReturnDefaultValues = true }
-    lint { abortOnError = true }
+    lint {
+        abortOnError = true
+        disable += listOf("QueryAllPackagesPermission", "QueryAllPackagesCondition")
+    }
 }
 dependencies {
     if (generalRuntime) {

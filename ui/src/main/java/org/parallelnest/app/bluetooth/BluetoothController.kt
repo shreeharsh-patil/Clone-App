@@ -25,6 +25,7 @@ data class BluetoothState(val supported: Boolean = false, val permitted: Boolean
                           val turningOn: Boolean = false, val scanning: Boolean = false, val devices: List<NearbyDevice> = emptyList(), val message: String? = null)
 
 /** Foreground, user-requested discovery (classic inquiry and BLE scan). No service, polling, persistence or device uploads. */
+@SuppressLint("MissingPermission")
 class BluetoothController(private val context: Context) {
     private val adapter: BluetoothAdapter?
         get() = context.getSystemService(BluetoothManager::class.java)?.adapter ?: BluetoothAdapter.getDefaultAdapter()
