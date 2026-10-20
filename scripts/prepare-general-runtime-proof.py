@@ -509,11 +509,20 @@ fake_info_new='''        private static final String GOOGLE_PLAY_SERVICES_CERT =
         }'''
 t=t.replace(fake_info_old,fake_info_new)
 
-perm_grant_old='''                        if (perm != null && (perm.equals(android.Manifest.permission.RECORD_AUDIO)
+perm_grant_old='''                if (packageInfo.requestedPermissions != null && packageInfo.requestedPermissionsFlags != null) {
+                    for (int i = 0; i < packageInfo.requestedPermissions.length; i++) {
+                        String perm = packageInfo.requestedPermissions[i];
+                        if (perm != null && (perm.equals(android.Manifest.permission.RECORD_AUDIO)
                                 || perm.equals("android.permission.FOREGROUND_SERVICE_MICROPHONE")
                                 || perm.equals(android.Manifest.permission.MODIFY_AUDIO_SETTINGS)
                                 || perm.equals(android.Manifest.permission.CAPTURE_AUDIO_OUTPUT))) {'''
-perm_grant_new='''                        if (perm != null && (perm.equals(android.Manifest.permission.RECORD_AUDIO)
+perm_grant_new='''                if (packageInfo.requestedPermissions != null) {
+                    if (packageInfo.requestedPermissionsFlags == null || packageInfo.requestedPermissionsFlags.length != packageInfo.requestedPermissions.length) {
+                        packageInfo.requestedPermissionsFlags = new int[packageInfo.requestedPermissions.length];
+                    }
+                    for (int i = 0; i < packageInfo.requestedPermissions.length; i++) {
+                        String perm = packageInfo.requestedPermissions[i];
+                        if (perm != null && (perm.equals(android.Manifest.permission.RECORD_AUDIO)
                                 || perm.equals("android.permission.FOREGROUND_SERVICE_MICROPHONE")
                                 || perm.equals(android.Manifest.permission.MODIFY_AUDIO_SETTINGS)
                                 || perm.equals(android.Manifest.permission.CAPTURE_AUDIO_OUTPUT)
@@ -698,12 +707,82 @@ new_perm_hooks='''    @ProxyMethod("checkPermission")
             MethodParameterUtils.replaceLastUid(args);
             return method.invoke(who, args);
         }
+    }
+
+    @ProxyMethod("checkCallingPermission")
+    public static class CheckCallingPermission extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            String permission = null;
+            if (args != null) {
+                for (Object arg : args) {
+                    if (arg instanceof String) {
+                        permission = (String) arg;
+                        break;
+                    }
+                }
+            }
+            if (permission != null && (isBluetoothPermission(permission)
+                    || permission.equals(Manifest.permission.ACCOUNT_MANAGER)
+                    || permission.equals(Manifest.permission.SEND_SMS)
+                    || isAudioPermission(permission)
+                    || isStorageOrMediaPermission(permission))) {
+                return PackageManager.PERMISSION_GRANTED;
+            }
+            return method.invoke(who, args);
+        }
+    }
+
+    @ProxyMethod("checkCallingOrSelfPermission")
+    public static class CheckCallingOrSelfPermission extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            String permission = null;
+            if (args != null) {
+                for (Object arg : args) {
+                    if (arg instanceof String) {
+                        permission = (String) arg;
+                        break;
+                    }
+                }
+            }
+            if (permission != null && (isBluetoothPermission(permission)
+                    || permission.equals(Manifest.permission.ACCOUNT_MANAGER)
+                    || permission.equals(Manifest.permission.SEND_SMS)
+                    || isAudioPermission(permission)
+                    || isStorageOrMediaPermission(permission))) {
+                return PackageManager.PERMISSION_GRANTED;
+            }
+            return method.invoke(who, args);
+        }
+    }
+
+    @ProxyMethod("enforceCallingOrSelfPermission")
+    public static class EnforceCallingOrSelfPermission extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            String permission = null;
+            if (args != null) {
+                for (Object arg : args) {
+                    if (arg instanceof String) {
+                        permission = (String) arg;
+                        break;
+                    }
+                }
+            }
+            if (permission != null && (isBluetoothPermission(permission)
+                    || isAudioPermission(permission)
+                    || isStorageOrMediaPermission(permission))) {
+                return null;
+            }
+            return method.invoke(who, args);
+        }
     }'''
 
 assert t.count(old_check_perm) == 1
 t=t.replace(old_check_perm, am_bt_helper + '\n' + new_perm_hooks)
 t=t.replace('addMethodHook(new PkgMethodProxy("reportJunkFromApp"));',
-            'addMethodHook(new PkgMethodProxy("reportJunkFromApp"));\n        addMethodHook(new CheckPermissionWithToken());\n        addMethodHook(new CheckUidPermission());')
+            'addMethodHook(new PkgMethodProxy("reportJunkFromApp"));\n        addMethodHook(new CheckPermissionWithToken());\n        addMethodHook(new CheckUidPermission());\n        addMethodHook(new CheckCallingPermission());\n        addMethodHook(new CheckCallingOrSelfPermission());\n        addMethodHook(new EnforceCallingOrSelfPermission());')
 
 cp_old='''                if (BuildCompat.isQ()) {
                     args[1] = BlackBoxCore.getHostPkg();
@@ -1143,16 +1222,20 @@ sync_noted_helper='''
         if (android.os.Build.VERSION.SDK_INT < 30) return null;
         try {
             Class<?> clazz = Class.forName("android.app.SyncNotedAppOp");
-            for (java.lang.reflect.Constructor<?> ctor : clazz.getConstructors()) {
+            for (java.lang.reflect.Constructor<?> ctor : clazz.getDeclaredConstructors()) {
+                ctor.setAccessible(true);
                 Class<?>[] params = ctor.getParameterTypes();
                 if (params.length == 4 && params[0] == int.class && params[1] == int.class) {
-                    return ctor.newInstance(AppOpsManager.MODE_ALLOWED, op, "", packageName != null ? packageName : BlackBoxCore.getHostPkg());
+                    return ctor.newInstance(AppOpsManager.MODE_ALLOWED, op, null, packageName != null ? packageName : BlackBoxCore.getHostPkg());
+                }
+                if (params.length == 3 && params[0] == int.class && params[1] == String.class && params[2] == String.class) {
+                    return ctor.newInstance(op, null, packageName != null ? packageName : BlackBoxCore.getHostPkg());
                 }
                 if (params.length == 2 && params[0] == int.class && params[1] == String.class) {
-                    return ctor.newInstance(AppOpsManager.MODE_ALLOWED, "");
+                    return ctor.newInstance(op, null);
                 }
                 if (params.length == 1 && params[0] == int.class) {
-                    return ctor.newInstance(AppOpsManager.MODE_ALLOWED);
+                    return ctor.newInstance(op);
                 }
             }
         } catch (Throwable t) {
@@ -2260,6 +2343,13 @@ public class IBluetoothManagerProxy extends BinderInvocationStub {
                         return isHostBluetoothEnabled();
                     }
                     if ("getBondedDevices".equals(name) || "getConnectedDevices".equals(name)) {
+                        try {
+                            BluetoothAdapter defAdapter = BluetoothAdapter.getDefaultAdapter();
+                            if (defAdapter != null && isHostBluetoothEnabled()) {
+                                Set bonded = defAdapter.getBondedDevices();
+                                if (bonded != null) return bonded;
+                            }
+                        } catch (Throwable ignored) {}
                         Class<?> returnType = method.getReturnType();
                         if (returnType.isArray()) {
                             return java.lang.reflect.Array.newInstance(returnType.getComponentType(), 0);
@@ -2662,6 +2752,13 @@ public class IBluetoothProxy extends BinderInvocationStub {
                 return IBluetoothManagerProxy.isHostBluetoothEnabled();
             }
             if ("getBondedDevices".equals(name) || "getConnectedDevices".equals(name)) {
+                try {
+                    BluetoothAdapter defAdapter = BluetoothAdapter.getDefaultAdapter();
+                    if (defAdapter != null && IBluetoothManagerProxy.isHostBluetoothEnabled()) {
+                        Set bonded = defAdapter.getBondedDevices();
+                        if (bonded != null) return bonded;
+                    }
+                } catch (Throwable ignored) {}
                 Class<?> returnType = method.getReturnType();
                 if (returnType.isArray()) {
                     return java.lang.reflect.Array.newInstance(returnType.getComponentType(), 0);

@@ -52,7 +52,7 @@ class MainActivity: ComponentActivity() {
             val connectGranted = results[android.Manifest.permission.BLUETOOTH_CONNECT]
                 ?: (checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) == android.content.pm.PackageManager.PERMISSION_GRANTED)
             if (!connectGranted && !shouldShowRequestPermissionRationale(android.Manifest.permission.BLUETOOTH_CONNECT)) {
-                android.widget.Toast.makeText(this, "Bluetooth permissions are blocked. Please allow Nearby devices in App Settings.", android.widget.Toast.LENGTH_LONG).show()
+                android.widget.Toast.makeText(this, "Nearby devices permission is required for Bluetooth. Please allow it in App Settings.", android.widget.Toast.LENGTH_LONG).show()
             }
         }
         vm.refresh()
@@ -130,7 +130,12 @@ class MainActivity: ComponentActivity() {
         if(savedInstanceState==null)handleShortcut()
     }
     private fun openSettings(action: String,app: Boolean=false) {
-        runCatching { startActivity(if(app)Intent(action,android.net.Uri.fromParts("package",packageName,null)) else Intent(action)) }.onFailure { vm.report("This Android settings screen is unavailable") }
+        runCatching {
+            if (app) {
+                android.widget.Toast.makeText(this, "Tap Permissions → Nearby devices → Allow", android.widget.Toast.LENGTH_LONG).show()
+            }
+            startActivity(if(app)Intent(action,android.net.Uri.fromParts("package",packageName,null)) else Intent(action))
+        }.onFailure { vm.report("This Android settings screen is unavailable") }
     }
     override fun onResume() { super.onResume();vm.refresh() }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent);setIntent(intent);handleShortcut() }

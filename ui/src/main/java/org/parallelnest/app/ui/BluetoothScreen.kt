@@ -29,6 +29,10 @@ import org.parallelnest.app.bluetooth.BluetoothController
     val scope = rememberCoroutineScope()
     val nearby=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
         controller.refresh()
+        if (!controller.hasPermission()) {
+            android.widget.Toast.makeText(context, "Nearby devices permission is required. Opening App Settings…", android.widget.Toast.LENGTH_SHORT).show()
+            permissions()
+        }
         scope.launch {
             kotlinx.coroutines.delay(250)
             controller.refresh()
@@ -48,7 +52,7 @@ import org.parallelnest.app.bluetooth.BluetoothController
     }
     val scanPermissions = remember {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.ACCESS_FINE_LOCATION)
+            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE)
         } else {
             arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
         }
@@ -57,6 +61,7 @@ import org.parallelnest.app.bluetooth.BluetoothController
         val observer=LifecycleEventObserver { _,event ->
             when(event) {
                 Lifecycle.Event.ON_START -> controller.startObserving()
+                Lifecycle.Event.ON_RESUME -> controller.refresh()
                 Lifecycle.Event.ON_STOP -> controller.stopObserving()
                 else -> Unit
             }
@@ -74,9 +79,11 @@ import org.parallelnest.app.bluetooth.BluetoothController
             Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
                 Text(when { !state.supported -> "Bluetooth unavailable on this device"; !state.permitted -> "Nearby devices permission required"; state.turningOn -> "Turning on Bluetooth…"; state.enabled -> "Bluetooth is on"; else -> "Bluetooth is off" },style=MaterialTheme.typography.titleMedium)
                 if(state.supported && !state.permitted) {
-                    Text("Allow Nearby devices to view paired devices and request pairing. Discovery asks for its scan permission only when you use Scan. Device details stay on your phone.")
-                    Button(onClick={if(connectPermissions.isNotEmpty()) nearby.launch(connectPermissions) else controller.refresh()}) { Text("Allow Nearby devices") }
-                    TextButton(onClick=permissions) { Text("App permission settings") }
+                    Text(if (state.enabled) "Bluetooth is on, but Android requires Nearby devices permission to access Bluetooth. Tap Allow or open App Settings to grant it." else "Allow Nearby devices to view paired devices and request pairing. Discovery asks for its scan permission only when you use Scan. Device details stay on your phone.")
+                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                        Button(onClick={if(connectPermissions.isNotEmpty()) nearby.launch(connectPermissions) else controller.refresh()}) { Text("Allow Nearby devices") }
+                        OutlinedButton(onClick=permissions) { Text("App permission settings") }
+                    }
                 } else if(state.supported) {
                     if(!state.enabled) {
                         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {

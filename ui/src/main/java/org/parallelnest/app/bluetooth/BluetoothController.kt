@@ -181,7 +181,8 @@ class BluetoothController(private val context: Context) {
                     enabled = hwEnabled,
                     turningOn = isTurningOn,
                     devices = emptyList(),
-                    scanning = false
+                    scanning = false,
+                    message = if (hwEnabled) "Bluetooth is on, but 'Nearby devices' permission is required to detect devices." else null
                 )
             }
             return
@@ -202,10 +203,19 @@ class BluetoothController(private val context: Context) {
                     scanPermitted = hasScanPermission(),
                     enabled = enabled,
                     turningOn = isTurningOn,
-                    devices = devices.values.sortedWith(compareByDescending<NearbyDevice>{it.bond==BluetoothDevice.BOND_BONDED}.thenBy{it.name.lowercase()})
+                    devices = devices.values.sortedWith(compareByDescending<NearbyDevice>{it.bond==BluetoothDevice.BOND_BONDED}.thenBy{it.name.lowercase()}),
+                    message = if (it.message?.startsWith("Bluetooth is on, but") == true) null else it.message
                 )
             }
-        }.onFailure { mutable.update { s -> s.copy(message="Bluetooth state unavailable: ${it.message}") } }
+        }.onFailure { err ->
+            val isSec = err is SecurityException
+            mutable.update { s ->
+                s.copy(
+                    permitted = if (isSec) false else s.permitted,
+                    message = if (isSec) "Nearby devices permission is required: ${err.message}" else "Bluetooth state unavailable: ${err.message}"
+                )
+            }
+        }
     }
 
     fun onEnableRequested() {
