@@ -332,7 +332,27 @@ compat=P/'runtime/src/main/java/com/tegufy/blackbox/core/system/pm/PackageManage
 t=compat.read_text(encoding='utf-8').replace('        pi.packageName = p.packageName;', '''        pi.packageName = p.packageName;
         pi.splitNames = p.splitNames;
         pi.splitRevisionCodes = p.splitRevisionCodes;''',1)
+t=t.replace('pi.requestedPermissions[i] = perm;', 'pi.requestedPermissions[i] = perm;\n                    pi.requestedPermissionsFlags[i] |= 2;')
 compat.write_text(t,encoding='utf-8')
+
+app_inst=P/'runtime/src/main/java/com/tegufy/blackbox/fake/delegate/AppInstrumentation.java'
+t=app_inst.read_text(encoding='utf-8')
+t=t.replace('private static AppInstrumentation sAppInstrumentation;', '''private static AppInstrumentation sAppInstrumentation;
+    private static java.lang.ref.WeakReference<Activity> sTopActivity;
+
+    public static Activity getTopActivity() {
+        return sTopActivity != null ? sTopActivity.get() : null;
+    }''')
+t=t.replace('checkActivity(activity);', '''sTopActivity = new java.lang.ref.WeakReference<>(activity);
+        checkActivity(activity);''')
+t=t.replace('public Activity newActivity(', '''@Override
+    public void callActivityOnResume(Activity activity) {
+        sTopActivity = new java.lang.ref.WeakReference<>(activity);
+        super.callActivityOnResume(activity);
+    }
+
+    public Activity newActivity(''')
+app_inst.write_text(t,encoding='utf-8')
 native_utils=P/'runtime/src/main/java/com/tegufy/blackbox/utils/NativeUtils.java'
 t=native_utils.read_text(encoding='utf-8')
 t=re.sub(r'            if \(libFile.exists\(\) && libFile.length\(\) == entry.getSize\(\)\) \{.*?\n            \}',
@@ -425,7 +445,7 @@ t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "
 t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "CheckSelfPermission: Granting audio permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }',
             'if (isAudioPermission(permission) || isBluetoothPermission(permission) || isStorageOrMediaPermission(permission) || isNotificationOrXiaomiPermission(permission)) {\n                Slog.d(TAG, "CheckSelfPermission: Granting permission: " + permission + " to " + packageName);\n                return PackageManager.PERMISSION_GRANTED;\n            }')
 t=t.replace('if (isAudioPermission(permission)) {\n                Slog.d(TAG, "ShouldShowRequestPermissionRationale: Not showing rationale for audio permission: " + permission);\n                return false;\n            }',
-            'if (isAudioPermission(permission) || isBluetoothPermission(permission) || isStorageOrMediaPermission(permission) || isNotificationOrXiaomiPermission(permission)) {\n                Slog.d(TAG, "ShouldShowRequestPermissionRationale: Returning rationale for permission: " + permission);\n                return true;\n            }')
+            'if (isAudioPermission(permission) || isBluetoothPermission(permission) || isStorageOrMediaPermission(permission) || isNotificationOrXiaomiPermission(permission)) {\n                Slog.d(TAG, "ShouldShowRequestPermissionRationale: Returning false (granted) for permission: " + permission);\n                return false;\n            }')
 
 pkg_info_old='''            if ("com.android.vending".equals(packageName)) {
                 return createFakeGooglePlayServicesPackageInfo();
@@ -973,8 +993,14 @@ perm_check_hooks='''        addMethodHook("checkPermission", new MethodHook() {
                 if (args != null) {
                     for (Object arg : args) {
                         if (arg instanceof String) {
-                            permission = (String) arg;
-                            break;
+                            String str = (String) arg;
+                            if (str.startsWith("android.permission.") || str.contains("permission")) {
+                                permission = str;
+                                break;
+                            }
+                            if (permission == null) {
+                                permission = str;
+                            }
                         }
                     }
                 }
@@ -992,8 +1018,14 @@ perm_check_hooks='''        addMethodHook("checkPermission", new MethodHook() {
                 if (args != null) {
                     for (Object arg : args) {
                         if (arg instanceof String) {
-                            permission = (String) arg;
-                            break;
+                            String str = (String) arg;
+                            if (str.startsWith("android.permission.") || str.contains("permission")) {
+                                permission = str;
+                                break;
+                            }
+                            if (permission == null) {
+                                permission = str;
+                            }
                         }
                     }
                 }
@@ -1013,9 +1045,10 @@ perm_check_hooks='''        addMethodHook("checkPermission", new MethodHook() {
         addMethodHook("shouldShowRequestPermissionRationale", new MethodHook() {
             @Override
             protected Object hook(Object who, java.lang.reflect.Method method, Object[] args) throws Throwable {
-                return true;
+                return false;
             }
         });
+        addMethodHook(new ValueMethodProxy("isPermissionRevokedByPolicy", false));
 '''
 allowed_helper='''
     private static boolean isAllowedPermission(String permission) {
@@ -1113,10 +1146,10 @@ sync_noted_helper='''
             for (java.lang.reflect.Constructor<?> ctor : clazz.getConstructors()) {
                 Class<?>[] params = ctor.getParameterTypes();
                 if (params.length == 4 && params[0] == int.class && params[1] == int.class) {
-                    return ctor.newInstance(AppOpsManager.MODE_ALLOWED, op, null, packageName);
+                    return ctor.newInstance(AppOpsManager.MODE_ALLOWED, op, "", packageName != null ? packageName : BlackBoxCore.getHostPkg());
                 }
                 if (params.length == 2 && params[0] == int.class && params[1] == String.class) {
-                    return ctor.newInstance(AppOpsManager.MODE_ALLOWED, null);
+                    return ctor.newInstance(AppOpsManager.MODE_ALLOWED, "");
                 }
                 if (params.length == 1 && params[0] == int.class) {
                     return ctor.newInstance(AppOpsManager.MODE_ALLOWED);
@@ -1193,6 +1226,14 @@ new_note_op='''    @ProxyMethod("noteOp")
     public static class NoteOp extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            Class<?> returnType = method.getReturnType();
+            if (returnType != null && returnType.getName().contains("SyncNotedAppOp")) {
+                int opCode = 0;
+                if (args != null && args.length > 0 && args[0] instanceof Integer) {
+                    opCode = (Integer) args[0];
+                }
+                return createSyncNotedAppOp(opCode, BlackBoxCore.getHostPkg());
+            }
             return AppOpsManager.MODE_ALLOWED;
         }
     }
@@ -1201,6 +1242,14 @@ new_note_op='''    @ProxyMethod("noteOp")
     public static class NoteOpNoThrow extends MethodHook {
         @Override
         protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            Class<?> returnType = method.getReturnType();
+            if (returnType != null && returnType.getName().contains("SyncNotedAppOp")) {
+                int opCode = 0;
+                if (args != null && args.length > 0 && args[0] instanceof Integer) {
+                    opCode = (Integer) args[0];
+                }
+                return createSyncNotedAppOp(opCode, BlackBoxCore.getHostPkg());
+            }
             return AppOpsManager.MODE_ALLOWED;
         }
     }
@@ -1221,6 +1270,82 @@ new_note_op='''    @ProxyMethod("noteOp")
         }
     }'''
 t=t.replace(old_note_op, new_note_op)
+
+old_note_proxy='''    @ProxyMethod("noteProxyOperation")
+    public static class NoteProxyOperation extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            return AppOpsManager.MODE_ALLOWED;
+        }
+    }'''
+new_note_proxy='''    @ProxyMethod("noteProxyOperation")
+    public static class NoteProxyOperation extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            Class<?> returnType = method.getReturnType();
+            if (returnType != null && returnType.getName().contains("SyncNotedAppOp")) {
+                int opCode = 0;
+                if (args != null && args.length > 0 && args[0] instanceof Integer) {
+                    opCode = (Integer) args[0];
+                }
+                return createSyncNotedAppOp(opCode, BlackBoxCore.getHostPkg());
+            }
+            return AppOpsManager.MODE_ALLOWED;
+        }
+    }'''
+t=t.replace(old_note_proxy, new_note_proxy)
+
+old_start_op='''    @ProxyMethod("startOp")
+    public static class StartOp extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            
+            Slog.d(TAG, "AppOps StartOp: Bypassing system check, allowing operation");
+            return AppOpsManager.MODE_ALLOWED;
+        }
+    }
+
+    @ProxyMethod("startOpNoThrow")
+    public static class StartOpNoThrow extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            
+            Slog.d(TAG, "AppOps StartOpNoThrow: Bypassing system check, allowing operation");
+            return AppOpsManager.MODE_ALLOWED;
+        }
+    }'''
+new_start_op='''    @ProxyMethod("startOp")
+    public static class StartOp extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            Class<?> returnType = method.getReturnType();
+            if (returnType != null && returnType.getName().contains("SyncNotedAppOp")) {
+                int opCode = 0;
+                if (args != null && args.length > 0 && args[0] instanceof Integer) {
+                    opCode = (Integer) args[0];
+                }
+                return createSyncNotedAppOp(opCode, BlackBoxCore.getHostPkg());
+            }
+            return AppOpsManager.MODE_ALLOWED;
+        }
+    }
+
+    @ProxyMethod("startOpNoThrow")
+    public static class StartOpNoThrow extends MethodHook {
+        @Override
+        protected Object hook(Object who, Method method, Object[] args) throws Throwable {
+            Class<?> returnType = method.getReturnType();
+            if (returnType != null && returnType.getName().contains("SyncNotedAppOp")) {
+                int opCode = 0;
+                if (args != null && args.length > 0 && args[0] instanceof Integer) {
+                    opCode = (Integer) args[0];
+                }
+                return createSyncNotedAppOp(opCode, BlackBoxCore.getHostPkg());
+            }
+            return AppOpsManager.MODE_ALLOWED;
+        }
+    }'''
+t=t.replace(old_start_op, new_start_op)
 
 old_note_operation='''    @ProxyMethod("noteOperation")
     public static class NoteOperation extends MethodHook {
@@ -1267,7 +1392,9 @@ replace_perm=needle_perm+'''
             if (intentAction != null) {
                 if (intentAction.equals("android.content.pm.action.REQUEST_PERMISSIONS")
                         || intentAction.equals("androidx.activity.result.contract.action.REQUEST_PERMISSIONS")
-                        || intentAction.endsWith(".REQUEST_PERMISSIONS")) {
+                        || intentAction.endsWith(".REQUEST_PERMISSIONS")
+                        || intentAction.contains("REQUEST_PERMISSION")
+                        || intentAction.contains("RequestPermission")) {
                     isPermissionReq = true;
                 }
             }
@@ -1281,7 +1408,9 @@ replace_perm=needle_perm+'''
             if (!isPermissionReq) {
                 if (intent.hasExtra("android.content.pm.extra.REQUEST_PERMISSIONS_NAMES")
                         || intent.hasExtra("androidx.activity.result.contract.extra.PERMISSIONS")
-                        || intent.hasExtra("androidx.activity.result.contract.extra.PERMISSION")) {
+                        || intent.hasExtra("androidx.activity.result.contract.extra.PERMISSION")
+                        || intent.hasExtra("permissions")
+                        || intent.hasExtra("permission")) {
                     isPermissionReq = true;
                 }
             }
@@ -1321,7 +1450,9 @@ replace_perm=needle_perm+'''
                         "android.permission.BLUETOOTH_SCAN",
                         "android.permission.BLUETOOTH_ADVERTISE",
                         "android.permission.ACCESS_FINE_LOCATION",
-                        "android.permission.ACCESS_COARSE_LOCATION"
+                        "android.permission.ACCESS_COARSE_LOCATION",
+                        "android.permission.BLUETOOTH",
+                        "android.permission.BLUETOOTH_ADMIN"
                     };
                 }
                 final String[] perms = requestedPerms;
@@ -1347,6 +1478,11 @@ replace_perm=needle_perm+'''
                             }
                             if (activity == null) {
                                 try {
+                                    activity = com.tegufy.blackbox.fake.delegate.AppInstrumentation.getTopActivity();
+                                } catch (Throwable ignored) {}
+                            }
+                            if (activity == null) {
+                                try {
                                     java.util.Map<IBinder, Object> acts = black.android.app.BRActivityThread.get(BlackBoxCore.mainThread()).mActivities();
                                     if (acts != null && !acts.isEmpty()) {
                                         for (Object rec : acts.values()) {
@@ -1354,7 +1490,7 @@ replace_perm=needle_perm+'''
                                             android.app.Activity a = black.android.app.BRActivityThreadActivityClientRecord.get(rec).activity();
                                             if (a != null && !a.isFinishing()) {
                                                 activity = a;
-                                                break;
+                                                if (a.hasWindowFocus()) break;
                                             }
                                         }
                                     }
@@ -1377,57 +1513,36 @@ replace_perm=needle_perm+'''
                                     f.setBoolean(activity, false);
                                 } catch (Throwable ignored) {}
 
-                                try {
-                                    Method dispatch = android.app.Activity.class.getDeclaredMethod("dispatchActivityResult", String.class, int.class, int.class, Intent.class);
-                                    dispatch.setAccessible(true);
-                                    dispatch.invoke(activity, rWho, reqCode, android.app.Activity.RESULT_OK, resultIntent);
-                                } catch (Throwable t) {
-                                    Slog.w(TAG, "dispatchActivityResult invocation failed: " + t.getMessage());
+                                boolean dispatched = false;
+                                if (rWho == null && reqCode != -1) {
+                                    try {
+                                        Method getRegistry = activity.getClass().getMethod("getActivityResultRegistry");
+                                        Object registry = getRegistry.invoke(activity);
+                                        if (registry != null) {
+                                            Method regDispatch = registry.getClass().getMethod("dispatchResult", int.class, int.class, Intent.class);
+                                            dispatched = (Boolean) regDispatch.invoke(registry, reqCode, android.app.Activity.RESULT_OK, resultIntent);
+                                        }
+                                    } catch (Throwable ignored) {}
                                 }
 
-                                try {
-                                    Method getRegistry = activity.getClass().getMethod("getActivityResultRegistry");
-                                    Object registry = getRegistry.invoke(activity);
-                                    if (registry != null) {
-                                        Method regDispatch = registry.getClass().getMethod("dispatchResult", int.class, int.class, Intent.class);
-                                        boolean dispatched = false;
-                                        if (reqCode != -1) {
-                                            try {
-                                                dispatched = (Boolean) regDispatch.invoke(registry, reqCode, android.app.Activity.RESULT_OK, resultIntent);
-                                            } catch (Throwable ignored) {}
-                                        }
-                                        if (!dispatched) {
-                                            try {
-                                                java.lang.reflect.Field rcToKeyField = null;
-                                                Class<?> cur = registry.getClass();
-                                                while (cur != null && rcToKeyField == null) {
-                                                    try {
-                                                        rcToKeyField = cur.getDeclaredField("mRcToKey");
-                                                    } catch (Throwable ex) {
-                                                        cur = cur.getSuperclass();
-                                                    }
-                                                }
-                                                if (rcToKeyField != null) {
-                                                    rcToKeyField.setAccessible(true);
-                                                    java.util.Map<?, ?> rcMap = (java.util.Map<?, ?>) rcToKeyField.get(registry);
-                                                    if (rcMap != null) {
-                                                        for (Object k : rcMap.keySet()) {
-                                                            if (k instanceof Integer) {
-                                                                regDispatch.invoke(registry, (Integer) k, android.app.Activity.RESULT_OK, resultIntent);
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            } catch (Throwable ignored) {}
-                                        }
+                                if (!dispatched) {
+                                    try {
+                                        Method dispatch = android.app.Activity.class.getDeclaredMethod("dispatchActivityResult", String.class, int.class, int.class, Intent.class);
+                                        dispatch.setAccessible(true);
+                                        dispatch.invoke(activity, rWho, reqCode, android.app.Activity.RESULT_OK, resultIntent);
+                                        dispatched = true;
+                                    } catch (Throwable t) {
+                                        Slog.w(TAG, "dispatchActivityResult invocation failed: " + t.getMessage());
                                     }
-                                } catch (Throwable ignored) {}
+                                }
 
-                                try {
-                                    Method onReq = android.app.Activity.class.getDeclaredMethod("onRequestPermissionsResult", int.class, String[].class, int[].class);
-                                    onReq.setAccessible(true);
-                                    onReq.invoke(activity, reqCode, perms, grantResults);
-                                } catch (Throwable ignored) {}
+                                if (!dispatched || (rWho != null && rWho.startsWith("@android:requestPermissions:"))) {
+                                    try {
+                                        Method onReq = android.app.Activity.class.getDeclaredMethod("onRequestPermissionsResult", int.class, String[].class, int[].class);
+                                        onReq.setAccessible(true);
+                                        onReq.invoke(activity, reqCode, perms, grantResults);
+                                    } catch (Throwable ignored) {}
+                                }
                             } else {
                                 Slog.w(TAG, "Could not resolve Activity to deliver permission results.");
                             }
