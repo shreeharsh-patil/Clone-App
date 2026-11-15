@@ -11,6 +11,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import org.parallelnest.app.engine.virtualization.GuestPackageManager
 import org.parallelnest.app.engine.virtualization.VirtualContainerEngine
+import java.util.regex.Pattern
 
 class GuestBluetoothConsentTest {
     @Test fun hostGrantDoesNotAuthorizeADifferentProbeInstance() = runBlocking {
@@ -43,9 +44,20 @@ class GuestBluetoothConsentTest {
             assertTrue(engine.setBluetoothConsent(first, true).success)
             assertEquals(true, engine.bluetoothConsent(first))
             assertEquals(false, engine.bluetoothConsent(second))
+            val scanButton = By.text(Pattern.compile("Run BLE scan", Pattern.CASE_INSENSITIVE))
+            assertTrue(engine.launchInstance(first).success)
+            val firstScan = device.wait(Until.findObject(scanButton), 10_000)
+            assertNotNull("The updated guest Activity must expose the BLE fixture", firstScan)
+            firstScan.click()
+            val bluetoothStatus = Pattern.compile(
+                "^(Waiting for Android BLE scan callbacks|Android BLE scan failed|Bluetooth is off or unavailable|" +
+                    "Android returned no BLE scanner|Received advertisements|Unable to start BLE scan).*"
+            )
+            assertTrue("The authorized guest must reach Android's Bluetooth path",
+                device.wait(Until.hasObject(By.text(bluetoothStatus)), 5_000))
             assertTrue(engine.launchInstance(second).success)
             val denial = "Enable Bluetooth for this instance in Clone Details"
-            val scan = device.wait(Until.findObject(By.text("Run BLE scan")), 10_000)
+            val scan = device.wait(Until.findObject(scanButton), 10_000)
             assertNotNull("The BLE control must run inside the actual guest Activity", scan)
             scan.click()
             assertTrue("Unconsented guest must not enter the Bluetooth path",

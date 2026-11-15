@@ -55,7 +55,7 @@ internal fun GuestBluetoothSection(
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(row.id, row.versionCode, state.bluetoothRevision) {
+    LaunchedEffect(row.id, row.versionCode, row.lastLaunch, state.bluetoothRevision) {
         if (probe) {
             try {
                 consent = vm.bluetoothConsent(row)

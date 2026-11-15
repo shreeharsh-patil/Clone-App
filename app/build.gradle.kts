@@ -11,6 +11,7 @@ dependencyLocking {
 android {
     namespace = "org.parallelnest.app"
     compileSdk = 36
+    ndkVersion = if (generalRuntime) "28.2.13676358" else "27.1.12297006"
     defaultConfig {
         applicationId = "org.parallelnest.app"
         minSdk = 33
