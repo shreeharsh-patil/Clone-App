@@ -144,8 +144,8 @@ class GeneralRuntimeEngine(private val context: Context, private val registry: R
                 resumed(app.packageName, user)
                 val now = System.currentTimeMillis()
                 val version = sourcePackage.longVersionCode
-                val row = CloneInfo(id, app.packageName, if (number == 1) name.trim() else "${name.trim().take(72)} $number", user.toLong(), now, now,
-                    number = number, engine = "virtual", virtualUser = user.toLong(), lastLaunch = now, runtime = "ready", compatibility = compat,
+                val row = CloneInfo(id, app.packageName, if (number == 1) name.trim() else "${name.trim().take(72)} $number", user.toLong(), now,
+                    lastLaunch = now, number = number, engine = "virtual", virtualUser = user.toLong(), runtime = "ready", compatibility = compat,
                     versionCode = version, abi = Build.SUPPORTED_64_BIT_ABIS.firstOrNull() ?: "arm64-v8a")
                 withContext(NonCancellable) {
                     check(policy.edit().putBoolean("resumed_$id", true).commit()) { "Could not persist guest verification" }
