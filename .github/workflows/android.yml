@@ -50,14 +50,6 @@ jobs:
             app/build/outputs/apk/**/*.apk
             isolation-probe/build/outputs/apk/debug/*.apk
             app/build/reports/
-      - name: Assemble corresponding source archive
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: git archive --format=zip --output=Clone-Apps-source.zip HEAD
-      - uses: actions/upload-artifact@v4
-        if: startsWith(github.ref, 'refs/tags/v')
-        with:
-          name: Clone-Apps-source
-          path: Clone-Apps-source.zip
   instrumented:
     runs-on: ubuntu-24.04
     strategy:
@@ -134,10 +126,6 @@ jobs:
         with:
           name: Clone-Apps-debug-and-unsigned-release
           path: artifacts
-      - uses: actions/download-artifact@v4
-        with:
-          name: Clone-Apps-source
-          path: artifacts/source
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -146,24 +134,26 @@ jobs:
         with:
           packages: platform-tools
       - run: sdkmanager 'build-tools;36.0.0'
-      - name: Sign release when credentials are available
+      - name: Publish signed release APK
         env:
+          GH_TOKEN: ${{ github.token }}
           KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           STORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
-          if [ -n "$KEYSTORE_B64" ]; then
-            printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/release.jks"
-            "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign --ks "$RUNNER_TEMP/release.jks" --ks-key-alias "$KEY_ALIAS" --ks-pass env:STORE_PASS --key-pass env:KEY_PASS --out artifacts/Clone-Apps-release.apk artifacts/app/build/outputs/apk/release/app-release-unsigned.apk
-            "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify artifacts/Clone-Apps-release.apk
-          else
-            echo 'No production signing credentials: publish installable debug APK plus clearly named unsigned release.'
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists"
+            exit 0
           fi
-      - name: Publish alpha release and source
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          find artifacts -name '*.apk' -o -name '*.zip' | sort > "$RUNNER_TEMP/assets.txt"
-          mapfile -t assets < "$RUNNER_TEMP/assets.txt"
-          gh release create "$GITHUB_REF_NAME" "${assets[@]}" --prerelease --title "Clone Apps $GITHUB_REF_NAME" --notes-file docs/RELEASE-NOTES.md
+          : "${KEYSTORE_B64:?Production signing credentials are missing}"
+          umask 077
+          keystore="$RUNNER_TEMP/release.jks"
+          trap 'rm -f -- "$keystore"' EXIT
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$keystore"
+          tools="$ANDROID_HOME/build-tools/36.0.0"
+          apk="artifacts/Clone-Apps-$GITHUB_REF_NAME.apk"
+          "$tools/apksigner" sign --ks "$keystore" --ks-key-alias "$KEY_ALIAS" --ks-pass env:STORE_PASS --key-pass env:KEY_PASS --out "$apk" artifacts/app/build/outputs/apk/release/app-release-unsigned.apk
+          "$tools/apksigner" verify "$apk"
+          "$tools/zipalign" -c -P 16 4 "$apk"
+          gh release create "$GITHUB_REF_NAME" "$apk" --verify-tag --prerelease --title "Clone Apps $GITHUB_REF_NAME" --notes-file docs/RELEASE-NOTES.md
