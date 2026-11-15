@@ -5,341 +5,258 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.bluetooth.BluetoothManager
+import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
-import android.bluetooth.le.ScanSettings
 import android.content.*
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.util.Log
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
 data class NearbyDevice(val address: String, val name: String, val bond: Int) {
-    val status: String get() = when(bond) {
+    val status: String get() = when (bond) {
         BluetoothDevice.BOND_BONDED -> "Paired"
         BluetoothDevice.BOND_BONDING -> "Pairing · confirm on both devices"
         else -> "Not paired"
     }
 }
-data class BluetoothState(val supported: Boolean = false, val permitted: Boolean = false, val scanPermitted: Boolean = false, val enabled: Boolean = false,
-                          val turningOn: Boolean = false, val scanning: Boolean = false, val devices: List<NearbyDevice> = emptyList(), val message: String? = null)
 
-/** Foreground, user-requested discovery (classic inquiry and BLE scan). No service, polling, persistence or device uploads. */
+data class BluetoothState(
+    val supported: Boolean = false,
+    val permitted: Boolean = false,
+    val scanPermitted: Boolean = false,
+    val enabled: Boolean = false,
+    val turningOn: Boolean = false,
+    val scanning: Boolean = false,
+    val devices: List<NearbyDevice> = emptyList(),
+    val message: String? = null
+)
+
+/** Owns foreground discovery only. Android handles pairing and accessory profile connections. */
 @SuppressLint("MissingPermission")
 class BluetoothController(private val context: Context) {
-    private val adapter: BluetoothAdapter?
-        get() = context.getSystemService(BluetoothManager::class.java)?.adapter ?: BluetoothAdapter.getDefaultAdapter()
-    private val mutable = MutableStateFlow(BluetoothState(supported = (context.getSystemService(BluetoothManager::class.java)?.adapter ?: BluetoothAdapter.getDefaultAdapter()) != null))
+    private val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
+    private val mutable = MutableStateFlow(BluetoothState(supported = adapter != null))
     val state = mutable.asStateFlow()
-    private val found = linkedMapOf<String,NearbyDevice>()
+    private val found = linkedMapOf<String, NearbyDevice>()
+    private var paired = emptyMap<String, NearbyDevice>()
     private var registered = false
-    private var ownsDiscovery = false
-    private var bleScanning = false
-    private val scope = CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
+    private var classicScanning = false
+    private var bleScan: Pair<BluetoothLeScanner, ScanCallback>? = null
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var deadline: Job? = null
-    private var pollingJob: Job? = null
+    private var scanError: String? = null
 
-    private val bleCallback = object : ScanCallback() {
-        override fun onScanResult(callbackType: Int, result: ScanResult?) {
-            if (!ownsDiscovery) return
-            result?.device?.let { device ->
-                val name = result.scanRecord?.deviceName ?: runCatching { device.name }.getOrNull() ?: "BLE device"
-                val address = device.address ?: return
-                if (found.size < 64 || found.containsKey(address)) {
-                    val current = found[address]
-                    val finalName = if (current != null && current.name != "BLE device" && current.name != "Unnamed device") {
-                        current.name
-                    } else if (name != "BLE device" && name != "Unnamed device") {
-                        name
-                    } else current?.name ?: name
-                    val bond = runCatching { device.bondState }.getOrDefault(BluetoothDevice.BOND_NONE)
-                    found[address] = NearbyDevice(address, finalName.take(120), bond)
-                    refresh()
-                }
-            }
-        }
+    fun hasPermission() = has(Manifest.permission.BLUETOOTH_CONNECT)
+    fun hasScanPermission() = has(Manifest.permission.BLUETOOTH_SCAN)
+    private fun has(permission: String) =
+        adapter != null && context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
 
-        override fun onBatchScanResults(results: MutableList<ScanResult>?) {
-            results?.forEach { onScanResult(0, it) }
-        }
-
-        override fun onScanFailed(errorCode: Int) {
-            // BLE scan failed
-        }
-    }
-
-    fun hasPermission(): Boolean {
-        if (adapter == null) return false
-        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
-        } else {
-            context.checkSelfPermission(Manifest.permission.BLUETOOTH) == PackageManager.PERMISSION_GRANTED
-        }
-    }
-
-    fun hasScanPermission(): Boolean {
-        if (adapter == null) return false
-        return if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            context.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED
-        } else {
-            val admin = context.checkSelfPermission(Manifest.permission.BLUETOOTH_ADMIN) == PackageManager.PERMISSION_GRANTED
-            val location = context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
-                context.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
-            admin && location
-        }
-    }
-
-    private val receiver = object: BroadcastReceiver() {
+    private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            when(intent.action) {
-                BluetoothDevice.ACTION_FOUND -> if(ownsDiscovery && hasPermission()) {
-                    runCatching {
-                        val device = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
-                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE)
-                        }
-                        val extraName = intent.getStringExtra(BluetoothDevice.EXTRA_NAME)
-                        device?.let { dev ->
-                            val current = found[dev.address]
-                            val rawName = runCatching { dev.name }.getOrNull() ?: extraName
-                            val finalName = if (current != null && current.name != "BLE device" && current.name != "Unnamed device") {
-                                current.name
-                            } else rawName ?: current?.name ?: "Unnamed device"
-                            if(found.size<64 || found.containsKey(dev.address)) {
-                                val bond = runCatching { dev.bondState }.getOrDefault(BluetoothDevice.BOND_NONE)
-                                found[dev.address] = NearbyDevice(dev.address, finalName.take(120), bond)
-                            }
-                        }
-                    }.onFailure { mutable.update { s -> s.copy(message="Device details unavailable; check Nearby devices permission") } }
+            when (intent.action) {
+                BluetoothDevice.ACTION_FOUND -> if (classicScanning && hasPermission() && hasScanPermission()) {
+                    val device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java) ?: return
+                    runCatching { record(device, intent.getStringExtra(BluetoothDevice.EXTRA_NAME) ?: device.name, "Unnamed device") }
+                        .onFailure { note("Classic device details are unavailable.") }
+                }
+                BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> if (classicScanning) {
+                    classicScanning = false
+                    finishIfIdle()
+                }
+                BluetoothAdapter.ACTION_STATE_CHANGED -> refresh()
+                BluetoothDevice.ACTION_BOND_STATE_CHANGED -> {
+                    val device = intent.getParcelableExtra(BluetoothDevice.EXTRA_DEVICE, BluetoothDevice::class.java)
+                    val bond = intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, BluetoothDevice.ERROR)
+                    if (device != null && bond != BluetoothDevice.ERROR) {
+                        found[device.address]?.let { found[device.address] = it.copy(bond = bond) }
+                    }
                     refresh()
                 }
-                BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> if(ownsDiscovery) {
-                    if (!bleScanning) {
-                        ownsDiscovery=false;deadline?.cancel()
-                        mutable.update { it.copy(scanning=false,message="Scan finished.") }
-                        refresh()
-                    }
-                }
-                BluetoothAdapter.ACTION_STATE_CHANGED -> {
-                    val stateExtra = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR)
-                    when (stateExtra) {
-                        BluetoothAdapter.STATE_TURNING_ON -> {
-                            mutable.update { it.copy(turningOn = true, message = "Turning on Bluetooth…") }
-                            startPollingForState()
-                        }
-                        BluetoothAdapter.STATE_ON -> {
-                            pollingJob?.cancel()
-                            mutable.update { it.copy(turningOn = false, enabled = true, message = null) }
-                            refresh()
-                        }
-                        BluetoothAdapter.STATE_TURNING_OFF -> {
-                            stopScan()
-                            mutable.update { it.copy(turningOn = false, enabled = false, message = "Turning off Bluetooth…") }
-                        }
-                        BluetoothAdapter.STATE_OFF -> {
-                            pollingJob?.cancel()
-                            stopScan()
-                            mutable.update { it.copy(turningOn = false, enabled = false, message = null) }
-                            refresh()
-                        }
-                        else -> refresh()
-                    }
-                }
-                BluetoothDevice.ACTION_BOND_STATE_CHANGED -> refresh()
             }
         }
     }
 
     fun startObserving() {
-        if(!registered) {
-            // Bluetooth broadcasts originate from a privileged Bluetooth UID,
-            // rather than the system UID; these platform actions are protected.
-            context.registerReceiver(receiver,IntentFilter().apply {
-                addAction(BluetoothDevice.ACTION_FOUND);addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
-                addAction(BluetoothAdapter.ACTION_STATE_CHANGED);addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
-            },Context.RECEIVER_EXPORTED)
-            registered=true
+        if (!registered) {
+            // These protected broadcasts may come from Android's separate Bluetooth UID.
+            context.registerReceiver(receiver, IntentFilter().apply {
+                addAction(BluetoothDevice.ACTION_FOUND)
+                addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED)
+                addAction(BluetoothAdapter.ACTION_STATE_CHANGED)
+                addAction(BluetoothAdapter.ACTION_DISCOVERY_FINISHED)
+            }, Context.RECEIVER_EXPORTED)
+            registered = true
         }
         refresh()
     }
 
-    @SuppressLint("MissingPermission")
-    private fun entry(device: BluetoothDevice) = NearbyDevice(device.address,device.name?.take(120) ?: "Unnamed device",device.bondState)
-
-    @SuppressLint("MissingPermission")
     fun refresh() {
-        val hwEnabled = runCatching { adapter?.isEnabled == true }.getOrDefault(false)
-        val stateCode = runCatching { adapter?.state }.getOrNull()
-        val isTurningOn = stateCode == BluetoothAdapter.STATE_TURNING_ON
-        if(!hasPermission()) {
-            mutable.update {
-                it.copy(
-                    permitted = false,
-                    scanPermitted = hasScanPermission(),
-                    enabled = hwEnabled,
-                    turningOn = isTurningOn,
-                    devices = emptyList(),
-                    scanning = false,
-                    message = if (hwEnabled) "Bluetooth is on, but 'Nearby devices' permission is required to detect devices." else null
-                )
-            }
-            return
+        val permitted = hasPermission()
+        val scanPermitted = hasScanPermission()
+        val stateCode = try {
+            adapter?.state
+        } catch (e: SecurityException) {
+            Log.w("BluetoothController", "Adapter state unavailable", e)
+            null
         }
-        runCatching {
-            val enabled = hwEnabled || stateCode == BluetoothAdapter.STATE_ON
-            if(!enabled && !isTurningOn) stopScan()
-            val devices = if(enabled) {
-                val paired = adapter?.bondedDevices?.associate { it.address to entry(it) } ?: emptyMap()
-                found.mapValues { (address,value) ->
-                    val remoteBond = runCatching { adapter?.getRemoteDevice(address)?.bondState }.getOrNull() ?: value.bond
-                    value.copy(bond = remoteBond)
-                } + paired
-            } else emptyMap()
-            mutable.update {
-                it.copy(
-                    permitted = true,
-                    scanPermitted = hasScanPermission(),
-                    enabled = enabled,
-                    turningOn = isTurningOn,
-                    devices = devices.values.sortedWith(compareByDescending<NearbyDevice>{it.bond==BluetoothDevice.BOND_BONDED}.thenBy{it.name.lowercase()}),
-                    message = if (it.message?.startsWith("Bluetooth is on, but") == true) null else it.message
-                )
+        val enabled = stateCode == BluetoothAdapter.STATE_ON
+        if (!permitted || !scanPermitted || !enabled) clearScan()
+        if (!permitted || !enabled) found.clear()
+        paired = if (enabled && permitted) {
+            try {
+                adapter?.bondedDevices.orEmpty().associate { device ->
+                    device.address to NearbyDevice(device.address, device.name?.take(120) ?: "Unnamed device", device.bondState)
+                }
+            } catch (e: SecurityException) {
+                note("Paired device details are unavailable. Check Nearby devices permission.")
+                emptyMap()
             }
-        }.onFailure { err ->
-            val isSec = err is SecurityException
-            mutable.update { s ->
-                s.copy(
-                    permitted = if (isSec) false else s.permitted,
-                    message = if (isSec) "Nearby devices permission is required: ${err.message}" else "Bluetooth state unavailable: ${err.message}"
-                )
-            }
-        }
-    }
-
-    fun onEnableRequested() {
-        mutable.update { it.copy(turningOn = true, message = "Turning on Bluetooth…") }
-        startPollingForState()
+        } else emptyMap()
+        mutable.update { it.copy(permitted = permitted, scanPermitted = scanPermitted, enabled = enabled,
+            turningOn = stateCode == BluetoothAdapter.STATE_TURNING_ON,
+            scanning = classicScanning || bleScan != null) }
+        publishDevices()
     }
 
     fun onEnableResult(accepted: Boolean) {
-        if (accepted) {
-            mutable.update { it.copy(turningOn = true, message = "Turning on Bluetooth…") }
-            startPollingForState()
-        } else {
-            refresh()
-            if (adapter?.isEnabled != true) {
-                mutable.update { it.copy(turningOn = false, message = "Could not turn on Bluetooth. Please enable it in Bluetooth settings.") }
-            }
-        }
+        refresh()
+        note(if (!accepted && !state.value.enabled) "Bluetooth is off. You can turn it on in Android settings." else null)
     }
 
-    private fun startPollingForState() {
-        pollingJob?.cancel()
-        pollingJob = scope.launch {
-            for (i in 0 until 20) {
-                delay(300)
-                val state = runCatching { adapter?.state }.getOrNull()
-                val isNowOn = adapter?.isEnabled == true || state == BluetoothAdapter.STATE_ON
-                if (isNowOn) {
-                    refresh()
-                    mutable.update { it.copy(turningOn = false, enabled = true, message = null) }
-                    return@launch
-                }
-            }
-            refresh()
-            mutable.update { it.copy(turningOn = false) }
-        }
+    fun onPermissionResult(granted: Boolean) {
+        refresh()
+        note(if (granted) null else "Android denied Nearby devices access. You can change it in App permissions.")
     }
 
-    @SuppressLint("MissingPermission")
     fun scan() {
-        if(!hasPermission() || !hasScanPermission()) { refresh();return }
-        if (android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S) {
-            val lm = context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
-            val locationOn = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) {
-                lm?.isLocationEnabled == true
-            } else {
-                lm?.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER) == true ||
-                    lm?.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER) == true
-            }
-            if (!locationOn) {
-                mutable.update { it.copy(scanning = false, message = "Turn on Location in device settings to discover Bluetooth devices on this Android version") }
-                return
-            }
+        refresh()
+        val bluetooth = adapter ?: return
+        if (!registered || !state.value.enabled || !hasPermission() || !hasScanPermission()) return
+        if (classicScanning || bleScan != null) return
+        found.clear()
+        publishDevices()
+        scanError = null
+        try {
+            // Android Classic inquiry is shared across apps. Leave existing discovery running.
+            classicScanning = !bluetooth.isDiscovering && bluetooth.startDiscovery()
+            if (!classicScanning) scanError = "Classic discovery could not start or is already running."
+        } catch (e: SecurityException) {
+            scanError = "Android denied Classic discovery."
         }
-        runCatching {
-            val nonNullAdapter = adapter ?: return
-            check(nonNullAdapter.isEnabled) { "Turn Bluetooth on before scanning" }
-            if (nonNullAdapter.isDiscovering) {
-                runCatching { nonNullAdapter.cancelDiscovery() }
-            }
-            if (bleScanning) {
-                runCatching { nonNullAdapter.bluetoothLeScanner?.stopScan(bleCallback) }
-                bleScanning = false
-            }
-            found.clear();refresh()
-            val classicStarted = runCatching { nonNullAdapter.startDiscovery() }.getOrDefault(false)
-            val leScanner = runCatching { nonNullAdapter.bluetoothLeScanner }.getOrNull()
-            if (leScanner != null) {
-                runCatching {
-                    val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
-                    leScanner.startScan(null, settings, bleCallback)
-                    bleScanning = true
+
+        try {
+            val scanner = bluetooth.bluetoothLeScanner
+            if (scanner != null) {
+                val callback = object : ScanCallback() {
+                    override fun onScanResult(type: Int, result: ScanResult) {
+                        if (bleScan?.second !== this || !hasPermission() || !hasScanPermission()) return
+                        runCatching { record(result.device, result.scanRecord?.deviceName ?: result.device.name, "BLE device") }
+                            .onFailure { note("BLE device details are unavailable.") }
+                    }
+
+                    override fun onScanFailed(errorCode: Int) {
+                        if (bleScan?.second !== this) return
+                        bleScan = null
+                        scanError = "Android BLE scan failed ($errorCode)."
+                        if (classicScanning) note("$scanError Classic discovery continues.") else finishIfIdle()
+                    }
                 }
+                bleScan = scanner to callback
+                scanner.startScan(callback)
             }
-            ownsDiscovery = classicStarted || bleScanning
-            check(ownsDiscovery) { "Android could not start discovery. Try Bluetooth settings or another device." }
-            mutable.update { it.copy(scanning=true,message="Scanning for nearby Bluetooth devices…") }
-            deadline?.cancel()
-            deadline=scope.launch {
-                delay(15_000)
-                stopScan()
-                mutable.update { it.copy(message="Scan finished. Make the other device discoverable and scan again if needed.") }
-            }
-        }.onFailure { mutable.update { s -> s.copy(message=it.message ?: "Discovery failed",scanning=false) } }
-    }
-
-    @SuppressLint("MissingPermission")
-    fun stopScan() {
-        deadline?.cancel();deadline=null
-        val wasScanning=ownsDiscovery
-        if(ownsDiscovery) {
-            if (hasScanPermission()) {
-                runCatching { adapter?.cancelDiscovery() }
-            }
-            if (bleScanning) {
-                runCatching { adapter?.bluetoothLeScanner?.stopScan(bleCallback) }
-                bleScanning = false
-            }
+        } catch (e: IllegalStateException) {
+            bleScan = null
+            scanError = "BLE scanner is unavailable."
+        } catch (e: SecurityException) {
+            bleScan = null
+            scanError = "Android denied BLE scanning."
         }
-        ownsDiscovery=false
-        mutable.update { it.copy(scanning=false,message=if(wasScanning) "Scan stopped" else it.message) }
+        if (!classicScanning && bleScan == null) {
+            note("Android could not start discovery. ${scanError.orEmpty()}")
+            return
+        }
+        mutable.update { it.copy(scanning = true, message = scanError ?: "Scanning for nearby Bluetooth devices…") }
+        deadline = scope.launch {
+            delay(15_000)
+            clearScan()
+            finishIfIdle()
+        }
     }
 
-    @SuppressLint("MissingPermission")
+    private fun record(device: BluetoothDevice, name: String?, fallback: String) {
+        val address = device.address
+        if (found.size >= 64 && address !in found) return
+        found[address] = NearbyDevice(address, name?.take(120) ?: found[address]?.name ?: fallback, device.bondState)
+        publishDevices()
+    }
+
+    private fun publishDevices() {
+        val devices = (found + paired).values
+            .sortedWith(compareByDescending<NearbyDevice> { it.bond == BluetoothDevice.BOND_BONDED }.thenBy { it.name.lowercase() })
+        mutable.update { it.copy(devices = devices) }
+    }
+
+    private fun finishIfIdle() {
+        if (classicScanning || bleScan != null) return
+        deadline?.cancel()
+        deadline = null
+        mutable.update { it.copy(scanning = false, message = "Scan finished. ${scanError.orEmpty()}".trim()) }
+    }
+
+    private fun clearScan() {
+        deadline?.cancel()
+        deadline = null
+        if (classicScanning) {
+            classicScanning = false
+            runCatching { adapter?.cancelDiscovery() }
+                .onFailure { Log.w("BluetoothController", "Could not cancel Classic discovery", it) }
+        }
+        val previousScan = bleScan
+        bleScan = null
+        previousScan?.let { (scanner, callback) ->
+            runCatching { scanner.stopScan(callback) }
+                .onFailure { Log.w("BluetoothController", "Could not stop BLE scan", it) }
+        }
+    }
+
+    fun stopScan() {
+        val wasScanning = classicScanning || bleScan != null
+        clearScan()
+        mutable.update { it.copy(scanning = false, message = if (wasScanning) "Scan stopped" else it.message) }
+    }
+
     fun pair(address: String) {
-        if(!hasPermission()) { refresh();return }
+        if (!hasPermission()) {
+            refresh()
+            return
+        }
         stopScan()
         runCatching {
-            check(mutable.value.devices.any { it.address==address }) { "Device is no longer in this list; scan again" }
-            val nonNullAdapter = adapter ?: error("Bluetooth unavailable")
-            check(nonNullAdapter.isEnabled) { "Turn Bluetooth on first" }
-            val device=nonNullAdapter.getRemoteDevice(address)
-            check(device.bondState==BluetoothDevice.BOND_NONE && device.createBond()) { "Android could not start pairing; use Bluetooth settings" }
-            mutable.update { it.copy(message="Pairing requested. Confirm any Android pairing prompt on both devices.") }
+            check(state.value.devices.any { it.address == address }) { "Device is no longer listed. Scan again." }
+            val device = checkNotNull(adapter).getRemoteDevice(address)
+            check(device.bondState == BluetoothDevice.BOND_NONE && device.createBond()) { "Android could not start pairing. Try Bluetooth settings." }
+            note("Pairing requested. Confirm Android’s pairing prompts on both devices.")
             refresh()
-        }.onFailure { mutable.update { s -> s.copy(message=it.message ?: "Pairing failed") } }
+        }.onFailure { note(it.message ?: "Pairing failed") }
     }
+
+    private fun note(message: String?) { mutable.update { it.copy(message = message) } }
 
     fun stopObserving() {
         stopScan()
-        pollingJob?.cancel()
-        if(registered) { context.unregisterReceiver(receiver);registered=false }
+        if (registered) {
+            context.unregisterReceiver(receiver)
+            registered = false
+        }
     }
 
-    fun dispose() { stopObserving();scope.cancel() }
+    fun dispose() {
+        stopObserving()
+        scope.cancel()
+    }
 }
 
 /** Only a URI selected through Android's picker is delegated, with a temporary read grant. */

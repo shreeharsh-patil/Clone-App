@@ -78,6 +78,8 @@ try:
         instrument('regressions', ['GuestHostingProofTest', 'VirtualStorageSecurityTest', 'DatabaseMigrationTest',
                                   'WorkProfileFlowTest', 'RecoveryDeletionTest', 'NativeAndSecurityTest',
                                   'OnboardingTest', 'BluetoothFeatureTest', 'VirtualDashboardTest', 'ShortcutRoutingTest', 'AppCompatibilityPickerTest'])
+        if config['execution'] == 'emulator':
+            instrument('guest-bluetooth-consent', ['GuestBluetoothConsentTest'])
     adb('shell', 'am', 'force-stop', 'org.parallelnest.app')
     instrument('after-force-stop', ['VirtualRecoveryTest'])
     if ARGS.reboot:

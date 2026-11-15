@@ -16,7 +16,10 @@ class GuestPackageManager(private val context: Context) {
         const val PROBE = "org.parallelnest.probe"
         const val ENTRY = "org.parallelnest.probe.GuestProbeActivity"
         const val LIMIT = "Prototype supports only the matching-signed first-party isolation probe; general Android apps need an audited component and Binder runtime"
-        private val FLAGS = PackageManager.PackageInfoFlags.of((PackageManager.GET_ACTIVITIES or PackageManager.GET_META_DATA or PackageManager.GET_SIGNING_CERTIFICATES).toLong())
+        private val FLAGS = PackageManager.PackageInfoFlags.of(
+            (PackageManager.GET_ACTIVITIES or PackageManager.GET_META_DATA or
+                PackageManager.GET_PERMISSIONS or PackageManager.GET_SIGNING_CERTIFICATES).toLong()
+        )
         fun digest(file: File): String = file.inputStream().use { input ->
             val digest = MessageDigest.getInstance("SHA-256")
             val buffer = ByteArray(64 * 1024)
@@ -61,7 +64,10 @@ class GuestPackageManager(private val context: Context) {
         val info = context.packageManager.getPackageArchiveInfo(apk.path, FLAGS) ?: error("Unreadable guest APK")
         val host = context.packageManager.getPackageInfo(context.packageName, FLAGS)
         check(info.packageName == PROBE && info.longVersionCode == meta.getLong("version")) { "Guest package metadata mismatch" }
-        check(info.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet() == host.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet()) { "Guest no longer matches host signing identity" }
+        val signers = info.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet()
+        check(!signers.isNullOrEmpty() && signers == host.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet()) {
+            "Guest no longer matches host signing identity"
+        }
         return meta to info
     }
     fun write(root: File, metadata: JSONObject) {

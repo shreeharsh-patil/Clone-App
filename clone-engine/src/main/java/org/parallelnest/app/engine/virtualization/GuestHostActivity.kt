@@ -37,7 +37,8 @@ open class GuestHostActivity : Activity() {
                 publicSourceDir = sourceDir; dataDir = root.path
             }
             val loader = DexClassLoader(appInfo.sourceDir, GuestStorage.child(root, "code_cache").path, null, classLoader.parent)
-            val context = GuestContext(this@GuestHostActivity, root, appInfo, loader, packageManager.getResourcesForApplication(appInfo))
+            val context = GuestContext(this@GuestHostActivity, root, appInfo, loader,
+                packageManager.getResourcesForApplication(appInfo), GuestBluetoothAccess(root, pkg))
             val application = Instrumentation.newApplication(android.app.Application::class.java, context)
             context.guestApplication = application
             instrumentation.callApplicationOnCreate(application)

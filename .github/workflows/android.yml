@@ -5,6 +5,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      experimental:
+        description: Also build the experimental guest runtime
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -30,8 +35,6 @@ jobs:
         run: cargo test --manifest-path rust-core/Cargo.toml --locked
       - name: Build both native ABIs
         run: bash scripts/build-rust.sh
-      - name: Prepare general runtime proof
-        run: python3 scripts/prepare-general-runtime-proof.py
       - name: Virtual runtime, Kotlin tests, lint and APKs
         run: |
           chmod +x gradlew
@@ -71,8 +74,6 @@ jobs:
         with:
           packages: platform-tools
       - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;27.1.12297006'
-      - name: Prepare general runtime proof
-        run: python3 scripts/prepare-general-runtime-proof.py
       - run: rustup show && bash scripts/build-rust.sh && chmod +x gradlew && ./gradlew :isolation-probe:assembleDebug
       - name: Enable KVM for emulator
         run: |
@@ -96,6 +97,30 @@ jobs:
             build/device-evidence/
             build/deletion-result.txt
             build/virtual-evidence/
+  experimental:
+    if: github.event_name == 'workflow_dispatch' && inputs.experimental
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358' 'cmake;3.22.1'
+      - run: ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358" bash scripts/build-rust.sh
+      - run: python3 scripts/prepare-general-runtime-proof.py
+      - run: |
+          chmod +x gradlew
+          ./gradlew -PgeneralRuntime=true :app:assembleDebug :app:assembleRelease --console=plain
+          python3 scripts/verify-apk.py app/build/outputs/apk/debug/app-debug.apk
+          python3 scripts/verify-apk.py app/build/outputs/apk/release/app-release-unsigned.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Clone-Apps-experimental-debug-and-unsigned-release
+          path: app/build/outputs/apk/**/*.apk
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build, instrumented]

@@ -2,7 +2,7 @@
 
 Clone Apps is an Android 13–16 Kotlin/Compose application with a Rust metadata validator. This feature branch implements a limited, original guest Activity runtime. It executes the first-party isolation probe APK inside host subprocesses with separate persistent data per instance.
 
-**This is not a complete third-party app cloning engine.** General APKs, native/split guests, Services, Providers and hardware bridges remain unsupported. The app shows that limitation and rejects unsupported apps before registration. The five requested engines were reviewed; none passed both provenance and technical gates. See the [candidate audit](docs/VIRTUAL-RUNTIME-AUDIT.md).
+The default backend runs the first-party probe. For ordinary apps and separate Google accounts, open **Separate app setup** for Android Private Space and manufacturer options. See the [runtime repair report](docs/RUNTIME-REPAIR.md) for current support and validation.
 
 New clones require no work profile, root or second Android user. The original app is never used as a substitute for a virtual launch. Each guest shares the host Android UID; directory separation is not OS sandbox isolation.
 
@@ -19,6 +19,8 @@ Open **Clone Apps → Add App → Clone Apps Probe → Clone (1)**. The runtime 
 
 Only the first-party probe is compatible with the current runtime. It must carry the guest protocol marker and the same certificate as the host. Other installed launcher apps appear with their unsupported reason. Installing a probe with an unrelated signing certificate does not bypass the gate.
 
+For the BLE fixture, open Clone Details, grant **Allow for this instance**, then open the clone and choose **Run BLE scan**. Select a discovered accessory with the standard GATT Battery Service to read its Battery Level. Android Nearby devices access is required. Older probes can be updated from Clone Details after installing the matching-signed updated APK.
+
 If no apps can be selected, the test probe is either absent or incompatible with the host signing identity. Ordinary installed apps cannot be cloned by this runtime. The picker groups compatible and unavailable apps, shows a notice when nothing compatible is installed, and opens the full compatibility reason when an unavailable app is tapped. A brighter Clone button appears only after a compatible app is selected; refreshing discovery removes stale selections.
 
 For the published production-signed prototype, the optional `Clone-Apps-Test-Probe-v2.apk` fixture is distributed on the [v0.3.0 prerelease page](https://github.com/shreeharsh-patil/Clone-App/releases/tag/v0.3.0-prototype). Install it alongside the release host, then select **Clone Apps Probe**. This fixture demonstrates the supported test-app flow and does not add compatibility for ordinary apps. Its source is `isolation-probe`, built with `-PprobeVersionCode=2` and signed with the existing host certificate.
@@ -28,10 +30,11 @@ Locally signed prototype artifacts are in `artifacts/virtual-runtime/` when the 
 ## Experimental general app runtime
 
 The opt-in `-PgeneralRuntime=true` build imports complete installed APK sets and
-runs ordinary guests with a source-built runtime. It uses a separate application
-ID and leaves the published probe prototype in place. Calculator, Notes and a
-controlled split APK fixture have run on an Android 15 x86_64 emulator; physical
-ARM64 and broader compatibility checks remain pending. See
+runs guest launch attempts with a source-built runtime. It retains the current
+application ID for in-place recovery of existing experimental data. The matching
+signature is required. The selected build only manages its own runtime's clones.
+Earlier revisions ran Calculator, Notes and a split fixture on an Android 15
+x86_64 emulator. See
 [build instructions, evidence and limits](docs/GENERAL-RUNTIME-EXPERIMENT.md).
 This is not a claim that every Android app can be cloned.
 

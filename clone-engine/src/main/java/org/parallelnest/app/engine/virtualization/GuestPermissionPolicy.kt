@@ -3,9 +3,10 @@ package org.parallelnest.app.engine.virtualization
 import android.Manifest
 import android.content.pm.PackageManager
 
-/** No privileged guest bridges are implemented. Host grants never imply guest grants. */
+/** The cooperative guest context may mediate Bluetooth CONNECT and SCAN explicitly. */
 object GuestPermissionPolicy {
     val unsupported = setOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO,
+        Manifest.permission.BLUETOOTH, Manifest.permission.BLUETOOTH_ADMIN,
         Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE,
         Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION,
         Manifest.permission.ACCESS_BACKGROUND_LOCATION, Manifest.permission.POST_NOTIFICATIONS,

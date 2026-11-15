@@ -1,0 +1,46 @@
+# Android runtime and Bluetooth repair
+
+## Baseline audit
+
+| Severity | Finding | Source and evidence |
+| --- | --- | --- |
+| Critical | The generator could report permissions as granted, synthesize permission results, rewrite Bluetooth attribution and alter AppOps and Google service behavior. An actual operation could still fail at the system service. | `scripts/prepare-general-runtime-proof.py` at `932d9e1`. The first-party runtime did not use those hooks. Exact physical failures reported by a third-party app remain unreproduced. |
+| High | The default configuration built the general experiment. CI then installed that backend into tests for the first-party runtime. | `gradle.properties`, `settings.gradle.kts`, `app/build.gradle.kts`. Baseline [CI run 39378902102](https://github.com/shreeharsh-patil/Clone-App/actions/runs/39378902102) logged `virtual` expected, `general_experimental` actual. |
+| High | General-runtime import marked an instance ready on successful APK copy and package registration. Launch treated the dispatch result as guest execution. Both backends could read each other's metadata as if it belonged to their own storage. | `GeneralRuntimeEngine.kt`, `VirtualContainerEngine.kt`. The experimental callback already existed in `SelectedRuntime.kt` but had no active waiter. |
+| High | Canonicalizing a guest directory entry accepted a symlink to a sibling in the same directory. A symlink at an instance UUID could resolve deletion to another instance. | `GuestStorage.kt`. A regression test checks the target survives an attempted alias deletion. |
+| Medium | Startup requested Bluetooth advertising, location, camera, microphone and other unrelated permissions. The manager also asked for advertising when scanning and redirected to Settings after denial. | `MainActivity.kt`, `BluetoothScreen.kt`, app and UI manifests. |
+| Medium | Classic and LE scans shared ownership state. The manager could cancel an existing Classic inquiry it did not start. BLE failure left stale state, and each result re-queried paired devices. | `BluetoothController.kt`. |
+| Medium | The probe had no Bluetooth access path or consent model. Legacy probes did not declare the cooperative Bluetooth protocol. | `GuestContext.kt`, `GuestPermissionPolicy.kt`, `GuestProbeActivity.java`. |
+| Low | The theme expression made all explicit themes dark. Clone tiles used a fixed column count. | `MainActivity.kt`, `NestUi.kt`. |
+
+## Implemented paths
+
+- The normal build runs the matching-signed APK probe with per-instance files, preferences, SQLite and an Activity resume acknowledgement. The experimental build is explicitly selected with `-PgeneralRuntime=true` after generating current sources. Both maintain the current application ID and require the same signing key for updates. Existing inactive runtime rows and work-profile rows stay in the registry.
+- The experiment requires a token-matched guest Activity resume before recording success. Existing ready rows display as unverified until they are relaunched with this build. It excludes the fabricated permission, Bluetooth attribution, AppOps and Google compatibility patches. Its manifest omits Nearby devices grants because the runtime lacks per-instance Bluetooth mediation for arbitrary guests.
+- The trusted probe's Bluetooth fixture runs in the actual app Activity. The manager checks the imported APK protocol and permission declarations and stores consent inside that instance directory. The guest checks both consent and Android's host grants before using the real platform Bluetooth service. The fixture does foreground BLE discovery and lets the user connect and read a standard Battery Level characteristic. Scan and GATT work end on exit or timeout. Removing consent stops that instance. The installed probe can run the same test under its own Android permissions.
+- The manager uses the Android enable dialog, requests CONNECT and SCAN when needed, handles paired devices and pairing attempts, and scopes scans to foreground navigation. It delegates accessory profile connections to Android Bluetooth settings and file transfer to Android’s share sheet. Both scans keep `neverForLocation` because neither uses results to derive location. Android may filter some beacon results under that declaration. [Android Bluetooth permissions](https://developer.android.com/develop/connectivity/bluetooth/bt-permissions)
+- Compose adds a Private Space and OEM setup guide, clone-specific Bluetooth status and consent, an adaptive dashboard grid and an explicit light theme. System theme uses Android dynamic colors. The guide opens a public Android settings screen. The user sets up, unlocks and installs apps in Private Space through Android.
+
+## Capability matrix
+
+| Capability | Default probe | General experiment | System-managed copy |
+| --- | --- | --- | --- |
+| Ordinary apps, component lifecycle and native libraries | Unsupported | Partial scope. Launch must resume, with current third-party runtime retesting pending | Native Android execution. App and device eligibility apply |
+| Multiple independent data instances | Probe files, preferences and SQLite per instance | Per-virtual-user storage, shared host UID and package code | OS-level data boundary. Number of copies depends on the platform |
+| Separate Google account and Play Store | Unsupported | Unsupported. Compatible apps may have their own app-level session | On eligible Google-certified Private Space installations, sign in and use Play Store from inside the profile |
+| Manager Bluetooth | Foreground Classic and BLE discovery, Android pairing and file share paths. Physical results pending | System Settings and share sheet | Managed by Android |
+| Guest Bluetooth | First-party foreground BLE scan, GATT connect and Battery Level read implemented. Physical results pending | Unsupported | App requests permissions from Android. Accessory, app and profile policies still apply |
+| Guest RFCOMM, BLE write/notifications, audio and advertising | Unsupported | Unsupported | Device, app and profile dependent |
+| Guest camera, microphone, location, notifications, providers, jobs and file pickers | Unsupported | Unverified | Native Android permissions and policy apply |
+
+Private Space is a separate Android profile. Clone Apps does not hold the default launcher role needed for Private Space management. Account setup, locking and installation belong to Android. The experiment shares the host UID and cannot provide a separately certified Play Store, system account isolation or Play Integrity. [Android 15 developer documentation](https://developer.android.com/about/versions/15/behavior-changes-all) · [Private Space setup](https://support.google.com/android/answer/15341885)
+
+Android's clone-profile type requires OEM integration. Xiaomi documents Dual apps on supported models. Motorola documents Moto Secure’s Secure Folder and availability varies by model and release. A work profile uses Android's managed-profile mechanism and can use consumer accounts when its policies and services allow it. Clone Apps preserves existing profiles and exposes no automatic provisioning. [AOSP multi-user documentation](https://source.android.com/docs/devices/admin/multi-user) · [Xiaomi Dual apps](https://www.mi.com/global/support/faq/details/KA-484739/) · [Moto Secure](https://en-us.support.motorola.com/app/answers/detail/a_id/171956/~/moto-secure/)
+
+## Validation and remaining acceptance
+
+- Rust registry tests under Rust 1.99.0 passed 21/21. Both Android Rust targets built with NDK 28.2.13676358 and the 16 KiB linker option. The probe’s Java Activity and Bluetooth fixture compiled directly against Android SDK 36.
+- The pinned experimental source generator completed on Windows against the reviewed checkouts. The build requires a generator hash stamp to prevent older generated code from being selected after upgrading the checkout.
+- Repeatable emulator evidence uses `scripts/test-virtual-runtime.py --api 36 --serial emulator-5570 --reboot --host-update`. The new instrumented test runs a real clone Activity with Android host grants and verifies that it cannot enter the BLE path using another instance’s consent. Other emulator tests cover runtime, storage, migration, and manager permissions. Consult the PR checks for the API 33–36 matrix.
+- Physical Motorola and Xiaomi/HyperOS phones and accessories were unavailable over ADB. Classic discovery and pairing, headset audio, a real BLE advertisement, GATT connection and Battery Level read, RFCOMM, writes and notifications, and the Private Space Google account/Play Store workflow have no new hardware evidence. Test the original probe and two hosted copies with a real Battery Service accessory, granting consent to one hosted copy at a time. Record model, OS build, accessory, observed data, disconnect and stop/relaunch behavior.
+- Same-UID hosting has no kernel boundary against guest code that can invoke other APIs. Only the matching-signed probe is admitted into the default backend. The experimental code remains an opt-in compatibility experiment, including existing hidden Android framework dependencies and incomplete app lifecycle, permission and storage coverage. Its data should be verified on a disposable device before it is used for anything important.

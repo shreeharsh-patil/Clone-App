@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 /** The same Activity runs as a normal installed app and from an unchanged copied APK. */
 public class GuestProbeActivity extends Activity {
     private SharedPreferences prefs;
+    private BluetoothProbe bluetooth;
     private void event(String value) {
         prefs.edit().putString("lifecycle", prefs.getString("lifecycle", "") + value + ";").commit();
     }
@@ -57,12 +58,17 @@ public class GuestProbeActivity extends Activity {
             } catch (Exception e) { result.setText("Save failed: " + e.getMessage()); }
         });
         TextView limits = new TextView(this);
-        limits.setText("First-party Activity hosting prototype. Files, preferences and SQLite are separate per instance. All guests share the host Android UID. Services, providers, jobs and hardware bridges are unsupported."); column.addView(limits);
+        limits.setText("Files, preferences and SQLite are separate per clone. Hosted probes use Clone Apps’ Android UID."); column.addView(limits);
+        bluetooth = new BluetoothProbe(this, column);
         setContentView(scroll);
     }
     @Override protected void onStart() { super.onStart(); event("start"); }
     @Override protected void onResume() { super.onResume(); event("resume"); }
     @Override protected void onPause() { event("pause"); super.onPause(); }
-    @Override protected void onStop() { event("stop"); super.onStop(); }
+    @Override protected void onStop() { bluetooth.stop(); event("stop"); super.onStop(); }
     @Override protected void onDestroy() { event("destroy"); super.onDestroy(); }
+    @Override public void onRequestPermissionsResult(int code, String[] names, int[] results) {
+        super.onRequestPermissionsResult(code, names, results);
+        if (code == BluetoothProbe.PERMISSION_REQUEST) bluetooth.permissionResult();
+    }
 }

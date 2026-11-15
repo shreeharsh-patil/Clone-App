@@ -17,12 +17,15 @@ class VirtualContainerEngine(private val context: Context, private val registry:
     private val runtime = GuestRuntimeManager(context)
     private val operations = Mutex()
     companion object {
-        const val reason = "First-party Activity hosting prototype. Ordinary third-party apps, native guests, Services, Providers and hardware bridges are unsupported. Guests share the host UID."
+        const val COMPATIBILITY = "probe_only"
+        const val reason = "Activity hosting prototype for the matching-signed Clone Apps Probe. Guests share the host UID. Ordinary APKs, native guests, Services and Providers are unsupported in this runtime."
     }
     override fun status() = EngineState("virtual", true, true, reason, linkedMapOf(
         "APK Activity" to "First-party, matching-signed probe only", "Storage" to "Per-instance files, preferences, SQLite and cache",
         "Processes" to "Two lazy host subprocess slots; one foreground Activity per slot", "Native/splits" to "Unsupported",
-        "Services / Receivers / Providers / jobs" to "Unsupported", "Camera / microphone / Bluetooth / location / notifications" to "No guest bridge; denied",
+        "Services / Receivers / Providers / jobs" to "Unsupported",
+        "Bluetooth" to "Foreground BLE testing in the updated probe with instance consent and Android Nearby devices authorization. Physical testing pending.",
+        "Camera / microphone / location / notifications" to "Unsupported in the probe runtime",
         "Play Services / Integrity / accounts" to "Unsupported"))
     override suspend fun listSupportedApps(): List<AppInfo> = withContext(Dispatchers.IO) {
         val pm = context.packageManager
@@ -30,7 +33,7 @@ class VirtualContainerEngine(private val context: Context, private val registry:
             .map { it.activityInfo.applicationInfo }.distinctBy { it.packageName }.filter { it.packageName != context.packageName }.map { app ->
                 val failure = runCatching { packages.installed(app.packageName) }.exceptionOrNull()
                 AppInfo(app.packageName, app.loadLabel(pm).toString(), listOf(app.sourceDir) + app.splitSourceDirs.orEmpty(), failure == null,
-                    failure?.message ?: "First-party guest Activity; no hardware or background component bridges", app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM != 0)
+                    failure?.message ?: "First-party guest Activity with independent storage", app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM != 0)
             }.sortedWith(compareByDescending<AppInfo> { it.supported }.thenBy { it.label.lowercase() })
     }
     override suspend fun createInstance(app: AppInfo, name: String, progress: (CreationStage) -> Unit): OperationResult = operations.withLock {
@@ -53,7 +56,7 @@ class VirtualContainerEngine(private val context: Context, private val registry:
                 val launched = runtime.launch(id, user)
                 check(launched.success) { launched.message }
                 val now = System.currentTimeMillis()
-                val row = CloneInfo(id, app.packageName, if(number == 1)name.trim() else "${name.trim().take(72)} $number", user, now, now, number=number, engine="virtual", virtualUser=user, runtime="ready", compatibility="probe_only", versionCode=metadata.getLong("version"), abi="bytecode")
+                val row = CloneInfo(id, app.packageName, if(number == 1)name.trim() else "${name.trim().take(72)} $number", user, now, now, number=number, engine="virtual", virtualUser=user, runtime="ready", compatibility=COMPATIBILITY, versionCode=metadata.getLong("version"), abi="bytecode")
                 withContext(NonCancellable) { registry.update { it + row } }
                 progress(CreationStage.REGISTERED)
                 OperationResult(true, "Probe clone $number executed its guest Activity", id)
@@ -63,7 +66,41 @@ class VirtualContainerEngine(private val context: Context, private val registry:
             }
         }
     }
-    private suspend fun actual(row: CloneInfo): CloneInfo = registry.snapshot().singleOrNull { it.id == row.id && it.engine == "virtual" } ?: error("Guest instance is unavailable")
+    private suspend fun actual(row: CloneInfo): CloneInfo =
+        registry.snapshot().singleOrNull { it.id == row.id && it.engine == "virtual" && it.compatibility == COMPATIBILITY }
+            ?: error("Guest instance is unavailable in this runtime")
+
+    /** null means the imported APK does not implement this version of the Bluetooth fixture. */
+    suspend fun bluetoothConsent(instance: CloneInfo): Boolean? = operations.withLock {
+        withContext(Dispatchers.IO) {
+            val row = actual(instance)
+            val root = storage.instance(row.id)
+            val access = GuestBluetoothAccess(root, packages.read(root).second)
+            if (access.supported) access.consent else null
+        }
+    }
+
+    suspend fun setBluetoothConsent(instance: CloneInfo, allowed: Boolean): OperationResult = operations.withLock {
+        withContext(Dispatchers.IO) {
+            val row = actual(instance)
+            val root = storage.instance(row.id)
+            val access = GuestBluetoothAccess(root, packages.read(root).second)
+            if (allowed) {
+                val granted = setOf(android.Manifest.permission.BLUETOOTH_CONNECT, android.Manifest.permission.BLUETOOTH_SCAN)
+                    .all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+                check(granted) { "Allow Nearby devices for Clone Apps first" }
+            } else {
+                // Mark consent revoked before closing any active guest Bluetooth session.
+                access.setConsent(false)
+                val stopped = runtime.stop(row.id, row.virtualUser)
+                if (!stopped.success) return@withContext OperationResult(false, "Bluetooth consent removed. ${stopped.message}", row.id)
+                registry.update { rows -> rows.map { if (it.id == row.id) it.copy(runtime = "stopped") else it } }
+                return@withContext OperationResult(true, "Bluetooth consent removed for ${row.name}", row.id)
+            }
+            access.setConsent(true)
+            OperationResult(true, "Bluetooth allowed for ${row.name}", row.id)
+        }
+    }
     override suspend fun launchInstance(instance: CloneInfo): OperationResult = operations.withLock {
         withContext(Dispatchers.IO) {
             val row = actual(instance)
@@ -116,6 +153,7 @@ class VirtualContainerEngine(private val context: Context, private val registry:
         }
     }
     override suspend fun getInstances(): List<CloneInfo> = withContext(Dispatchers.IO) {
-        registry.snapshot().filter { it.engine=="virtual" }.map { row -> if(storage.instance(row.id).resolve("package.json").isFile) row else row.copy(runtime="missing") }
+        registry.snapshot().filter { it.engine=="virtual" && it.compatibility == COMPATIBILITY }
+            .map { row -> if(storage.instance(row.id).resolve("package.json").isFile) row else row.copy(runtime="missing") }
     }
 }
