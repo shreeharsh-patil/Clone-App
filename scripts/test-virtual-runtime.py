@@ -38,6 +38,14 @@ def instrument(name, classes):
                  'org.parallelnest.app.test/androidx.test.runner.AndroidJUnitRunner')
     (OUT / f'{name}.txt').write_text(output, encoding='utf-8')
     if not re.search(r'OK \([1-9][0-9]* tests?\)', output) or 'FAILURES!!!' in output or 'INSTRUMENTATION_FAILED' in output:
+        if config['execution'] == 'emulator':
+            try:
+                screenshot = subprocess.check_output(ADB + ['exec-out', 'screencap', '-p'], timeout=15)
+                (OUT / f'{name}-failure.png').write_bytes(screenshot)
+                windows = adb('shell', 'dumpsys', 'window', timeout=15)
+                (OUT / f'{name}-windows.txt').write_text(windows, encoding='utf-8')
+            except (subprocess.SubprocessError, OSError) as error:
+                print(f'Could not capture failure diagnostics: {error}')
         raise RuntimeError(f'{name} failed:\n{output}')
     print(f'{name}: ' + re.search(r'OK \(.*?\)', output).group(), flush=True)
 
@@ -78,6 +86,8 @@ try:
         instrument('regressions', ['GuestHostingProofTest', 'VirtualStorageSecurityTest', 'DatabaseMigrationTest',
                                   'WorkProfileFlowTest', 'RecoveryDeletionTest', 'NativeAndSecurityTest',
                                   'OnboardingTest', 'BluetoothFeatureTest', 'VirtualDashboardTest', 'ShortcutRoutingTest', 'AppCompatibilityPickerTest'])
+        if config['execution'] == 'emulator':
+            instrument('guest-bluetooth-consent', ['GuestBluetoothConsentTest'])
     adb('shell', 'am', 'force-stop', 'org.parallelnest.app')
     instrument('after-force-stop', ['VirtualRecoveryTest'])
     if ARGS.reboot:

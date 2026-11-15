@@ -17,7 +17,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlinx.coroutines.launch
+import androidx.compose.runtime.saveable.rememberSaveable
 import org.parallelnest.app.bluetooth.BluetoothController
 
 @Composable fun BluetoothScreen(settings: () -> Unit, permissions: () -> Unit, shareFile: () -> Unit) {
@@ -25,42 +25,28 @@ import org.parallelnest.app.bluetooth.BluetoothController
     val lifecycle=LocalLifecycleOwner.current.lifecycle
     val controller=remember { BluetoothController(context.applicationContext) }
     val state by controller.state.collectAsStateWithLifecycle()
-    var pendingScan by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val nearby=rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        controller.refresh()
-        if (!controller.hasPermission()) {
-            android.widget.Toast.makeText(context, "Nearby devices permission is required. Opening App Settings…", android.widget.Toast.LENGTH_SHORT).show()
-            permissions()
-        }
-        scope.launch {
-            kotlinx.coroutines.delay(250)
-            controller.refresh()
-            if(pendingScan && controller.hasScanPermission() && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) controller.scan()
-            pendingScan=false
+    var pendingScan by rememberSaveable { mutableStateOf(false) }
+    val nearby = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        controller.onPermissionResult(granted)
+        if (!granted) pendingScan = false
+        if (pendingScan && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+            pendingScan = false
+            controller.scan()
         }
     }
-    val enable=rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+    val enable = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         controller.onEnableResult(result.resultCode == android.app.Activity.RESULT_OK)
-    }
-    val connectPermissions = remember {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            arrayOf(Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_ADVERTISE)
-        } else {
-            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-        }
-    }
-    val scanPermissions = remember {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_ADVERTISE)
-        } else {
-            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)
-        }
     }
     DisposableEffect(lifecycle,controller) {
         val observer=LifecycleEventObserver { _,event ->
             when(event) {
-                Lifecycle.Event.ON_START -> controller.startObserving()
+                Lifecycle.Event.ON_START -> {
+                    controller.startObserving()
+                    if (pendingScan && controller.hasScanPermission()) {
+                        pendingScan = false
+                        controller.scan()
+                    }
+                }
                 Lifecycle.Event.ON_RESUME -> controller.refresh()
                 Lifecycle.Event.ON_STOP -> controller.stopObserving()
                 else -> Unit
@@ -80,16 +66,13 @@ import org.parallelnest.app.bluetooth.BluetoothController
                 Text(when { !state.supported -> "Bluetooth unavailable on this device"; !state.permitted -> "Nearby devices permission required"; state.turningOn -> "Turning on Bluetooth…"; state.enabled -> "Bluetooth is on"; else -> "Bluetooth is off" },style=MaterialTheme.typography.titleMedium)
                 if(state.supported && !state.permitted) {
                     Text(if (state.enabled) "Bluetooth is on, but Android requires Nearby devices permission to access Bluetooth. Tap Allow or open App Settings to grant it." else "Allow Nearby devices to view paired devices and request pairing. Discovery asks for its scan permission only when you use Scan. Device details stay on your phone.")
-                    Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                        Button(onClick={if(connectPermissions.isNotEmpty()) nearby.launch(connectPermissions) else controller.refresh()}) { Text("Allow Nearby devices") }
-                        OutlinedButton(onClick=permissions) { Text("App permission settings") }
-                    }
+                    Button(onClick = { nearby.launch(Manifest.permission.BLUETOOTH_CONNECT) }) { Text("Allow Nearby devices") }
+                    TextButton(onClick = permissions) { Text("App permission settings") }
                 } else if(state.supported) {
                     if(!state.enabled) {
                         Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
                             Button(
                                 onClick={
-                                    controller.onEnableRequested()
                                     runCatching { enable.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)) }.onFailure { settings() }
                                 },
                                 enabled=!state.turningOn
@@ -97,7 +80,7 @@ import org.parallelnest.app.bluetooth.BluetoothController
                             OutlinedButton(onClick=settings) { Text("Bluetooth settings") }
                         }
                     } else {
-                        Button(onClick={if(state.scanning)controller.stopScan() else if(state.scanPermitted)controller.scan() else {pendingScan=true;nearby.launch(scanPermissions)}},modifier=Modifier.fillMaxWidth()) { Text(if(state.scanning) "Stop scan" else "Scan for devices") }
+                        Button(onClick={if(state.scanning)controller.stopScan() else if(state.scanPermitted)controller.scan() else {pendingScan=true;nearby.launch(Manifest.permission.BLUETOOTH_SCAN)}},modifier=Modifier.fillMaxWidth()) { Text(if(state.scanning) "Stop scan" else "Scan for devices") }
                     }
                     if(state.scanning || state.turningOn) LinearProgressIndicator(Modifier.fillMaxWidth())
                     if(state.enabled) {
@@ -105,6 +88,7 @@ import org.parallelnest.app.bluetooth.BluetoothController
                             TextButton(onClick={controller.refresh()}){Text("Refresh devices")}
                             TextButton(onClick=settings){Text("Bluetooth settings")}
                         }
+                        if (!state.scanPermitted) TextButton(onClick = permissions) { Text("App permission settings") }
                     }
                 }
                 state.message?.let { Text(it,style=MaterialTheme.typography.bodyMedium,color=MaterialTheme.colorScheme.onSurfaceVariant) }
@@ -120,7 +104,7 @@ import org.parallelnest.app.bluetooth.BluetoothController
             }
         }
         if(state.permitted && state.enabled) {
-            item { Text("Paired & discovered devices",style=MaterialTheme.typography.titleMedium) }
+            item { Text("Bluetooth devices",style=MaterialTheme.typography.titleMedium) }
             if(state.devices.isEmpty()) item { Text(if(state.scanning) "Searching… Make the other device discoverable." else "No devices listed. Make the other device discoverable and scan, or open Bluetooth settings for accessory setup.",color=MaterialTheme.colorScheme.onSurfaceVariant) }
             items(state.devices,key={it.address}) { device ->
                 Card(Modifier.fillMaxWidth()) {
@@ -130,10 +114,7 @@ import org.parallelnest.app.bluetooth.BluetoothController
                         if(device.bond==BluetoothDevice.BOND_NONE) {
                             OutlinedButton(onClick={controller.pair(device.address)}) { Text("Pair device") }
                         } else if(device.bond==BluetoothDevice.BOND_BONDED) {
-                            Row(horizontalArrangement=Arrangement.spacedBy(8.dp)) {
-                                Button(onClick=settings) { Text("Connect in settings") }
-                                TextButton(onClick=settings) { Text("Device settings") }
-                            }
+                            OutlinedButton(onClick = settings) { Text("Open Bluetooth settings") }
                         }
                     }
                 }

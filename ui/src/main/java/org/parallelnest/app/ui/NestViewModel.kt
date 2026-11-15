@@ -11,6 +11,7 @@ import kotlinx.coroutines.sync.Mutex
 import org.parallelnest.app.core.*
 import org.parallelnest.app.core.diagnostics.*
 import org.parallelnest.app.engine.api.*
+import org.parallelnest.app.engine.virtualization.VirtualContainerEngine
 
 object AppCatalog {
     private val popular=setOf("com.whatsapp","com.instagram.android","com.snapchat.android","com.discord","org.telegram.messenger","com.openai.chatgpt")
@@ -24,7 +25,8 @@ object AppCatalog {
 }
 data class CreationState(val current: AppInfo?=null,val stage: String="Checking compatibility",val total: Int=0,val finished: Int=0,val running: Boolean=false,val outcomes: List<String> = emptyList(),val cancelRemaining: Boolean=false)
 data class NestState(val runtime: EngineState?=null,val instances: List<CloneInfo> = emptyList(),val apps: List<AppInfo> = emptyList(),val busy: Boolean=false,val message: String?=null,val discoveryComplete: Boolean=false,
-    val theme: String="dark",val selection: List<String> = emptyList(),val query: String="",val creation: CreationState=CreationState(),val report: CompatibilityReport?=null,val diagnosticBusy: Boolean=false,val legacy: List<CloneInfo> = emptyList())
+    val theme: String="dark",val selection: List<String> = emptyList(),val query: String="",val creation: CreationState=CreationState(),val report: CompatibilityReport?=null,val diagnosticBusy: Boolean=false,val legacy: List<CloneInfo> = emptyList(),
+    val inactiveRuntimeCount: Int = 0, val bluetoothRevision: Int = 0)
 class NestViewModel(app: Application,private val saved: SavedStateHandle): AndroidViewModel(app) {
     private val nest=app as NestServices
     val engine=nest.engine
@@ -45,7 +47,15 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
         refresh()
     }
     fun refresh() { viewModelScope.launch(Dispatchers.IO) {
-        try { val runtime=engine.status();val rows=engine.getInstances();val legacy=registry.snapshot().filter { it.engine=="work_profile" };mutable.update { it.copy(runtime=runtime,instances=rows,legacy=legacy) } }
+        try {
+            val runtime = engine.status()
+            val rows = engine.getInstances()
+            val savedRows = registry.snapshot()
+            val compatibility = if (runtime.type == "general_experimental") runtime.type else VirtualContainerEngine.COMPATIBILITY
+            mutable.update { it.copy(runtime = runtime, instances = rows,
+                legacy = savedRows.filter { row -> row.engine == "work_profile" },
+                inactiveRuntimeCount = savedRows.count { row -> row.engine == "virtual" && row.compatibility != compatibility }) }
+        }
         catch(e:CancellationException){throw e}catch(e:Throwable){report(e.message ?: "Could not read instances")}
     } }
     fun report(message: String) { mutable.update { it.copy(message=message) } }
@@ -104,6 +114,16 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
     fun rename(row: CloneInfo,name: String) { viewModelScope.launch { runOperation { registry.update { rows -> rows.map { if(it.id==row.id)it.copy(name=name.trim()) else it } };OperationResult(true,"Name updated") } } }
     fun accent(row: CloneInfo,value: Int) { viewModelScope.launch { runOperation { registry.update { rows -> rows.map { if(it.id==row.id)it.copy(accent=value) else it } };OperationResult(true,"Instance icon style updated") } } }
     fun update(row: CloneInfo) { viewModelScope.launch { runOperation { engine.updateInstance(row) } } }
+    suspend fun bluetoothConsent(row: CloneInfo): Boolean? = (engine as? VirtualContainerEngine)?.bluetoothConsent(row)
+    fun setBluetoothConsent(row: CloneInfo, allowed: Boolean) {
+        val probe = engine as? VirtualContainerEngine ?: return
+        viewModelScope.launch {
+            runOperation(queue = true) {
+                try { probe.setBluetoothConsent(row, allowed) }
+                finally { mutable.update { it.copy(bluetoothRevision = it.bluetoothRevision + 1) } }
+            }
+        }
+    }
     fun launchLegacy(row: CloneInfo) { viewModelScope.launch { runOperation { profileEngine.launchInstance(row) } } }
     fun theme(value: String) { viewModelScope.launch { registry.textSetting("theme",value) } }
     fun diagnostics(row: CloneInfo) {

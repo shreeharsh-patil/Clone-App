@@ -23,6 +23,23 @@ class VirtualStorageSecurityTest {
             assertEquals("keep", sentinel.readText()); sentinel.delete()
         } finally { storage.delete(id) }
     }
+    @Test fun siblingInstanceAliasCannotBeDeletedAsAnotherClone() {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val storage = GuestStorage(context)
+        val id = UUID.randomUUID().toString()
+        val root = storage.prepare(id)
+        val aliasId = UUID.randomUUID().toString()
+        val alias = File(root.parentFile, aliasId)
+        val sentinel = File(root, "sentinel").apply { writeText("keep") }
+        try {
+            android.system.Os.symlink(root.path, alias.path)
+            assertThrows(IllegalArgumentException::class.java) { storage.delete(aliasId) }
+            assertEquals("keep", sentinel.readText())
+        } finally {
+            java.nio.file.Files.deleteIfExists(alias.toPath())
+            storage.delete(id)
+        }
+    }
     @Test fun foreignPackagesCannotPassTheRuntimeGate() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         assertThrows(IllegalArgumentException::class.java) { GuestPackageManager(context).installed("com.android.settings") }

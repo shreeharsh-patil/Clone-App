@@ -11,18 +11,23 @@ dependencyLocking {
 android {
     namespace = "org.parallelnest.app"
     compileSdk = 36
-    ndkVersion = "28.2.13676358"
+    ndkVersion = if (generalRuntime) "28.2.13676358" else "27.1.12297006"
     defaultConfig {
         applicationId = "org.parallelnest.app"
         minSdk = 33
         targetSdk = 36
-        versionCode = 18
-        versionName = "0.5.0"
-        manifestPlaceholders["applicationLabel"] = "@string/app_name"
+        versionCode = 19
+        versionName = "0.5.1"
+        manifestPlaceholders["applicationLabel"] = if (generalRuntime) "Clone Apps (Experimental)" else "@string/app_name"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
     sourceSets.getByName("main").java.srcDir(if (generalRuntime) "src/generalRuntime/java" else "src/probeRuntime/java")
+    if (generalRuntime) {
+        listOf("debug", "release").forEach {
+            sourceSets.getByName(it).manifest.srcFile("src/generalRuntime/AndroidManifest.xml")
+        }
+    }
     signingConfigs {
         create("production") {
             System.getenv("SIGNING_STORE_FILE")?.let { storeFile = file(it) }
@@ -45,10 +50,7 @@ android {
     kotlinOptions { jvmTarget = "17" }
     packaging { jniLibs { useLegacyPackaging = false } }
     testOptions { unitTests.isReturnDefaultValues = true }
-    lint {
-        abortOnError = true
-        disable += listOf("QueryAllPackagesPermission", "QueryAllPackagesCondition")
-    }
+    lint { abortOnError = true }
 }
 dependencies {
     if (generalRuntime) {

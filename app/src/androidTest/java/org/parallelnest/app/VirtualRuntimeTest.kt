@@ -1,6 +1,5 @@
 package org.parallelnest.app
 
-import android.content.Intent
 import android.database.sqlite.SQLiteDatabase
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.uiautomator.*
@@ -56,7 +55,10 @@ class VirtualRuntimeTest {
         assertEquals("virtual", engine.status().type)
         val beforeUsers = test.device.executeShellCommand("pm list users")
         // Explicitly operate on the standalone original once, then require its bytes to stay unchanged.
-        test.context.startActivity(Intent().setClassName(GuestPackageManager.PROBE, GuestPackageManager.ENTRY).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        val originalLaunch = test.device.executeShellCommand(
+            "am start -W -n ${GuestPackageManager.PROBE}/${GuestPackageManager.ENTRY}"
+        )
+        assertTrue(originalLaunch, originalLaunch.lineSequence().any { it.trim() == "Status: ok" })
         test.save("ORIGINAL_SENTINEL")
         // Wait for a quiescent standalone fixture before byte-for-byte comparisons.
         // Its own final stop/destroy callbacks can otherwise race the baseline read.

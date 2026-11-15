@@ -2,11 +2,14 @@ package org.parallelnest.app.engine.virtualization
 
 import android.content.Context
 import java.io.File
+import java.nio.file.Files
 import java.util.UUID
 
 /** Directory separation for trusted guests sharing the host UID, not a security sandbox. */
 class GuestStorage(context: Context) {
-    private val root = File(context.filesDir, "virtual/instances").apply { mkdirs() }.canonicalFile
+    private val root = child(child(context.filesDir, "virtual"), "instances").apply {
+        check(isDirectory || mkdirs() || isDirectory) { "Cannot open guest storage" }
+    }
     fun instance(id: String): File {
         require(UUID.fromString(id).toString() == id) { "Invalid instance UUID" }
         return child(root, id)
@@ -30,7 +33,9 @@ class GuestStorage(context: Context) {
     companion object {
         fun child(parent: File, name: String): File {
             require(name.isNotEmpty() && name != "." && name != ".." && name.none { it == '/' || it == '\\' || it.isISOControl() }) { "Invalid private file name" }
-            val target = File(parent, name).canonicalFile
+            val entry = File(parent, name)
+            require(!Files.isSymbolicLink(entry.toPath())) { "Symbolic links are not guest storage entries" }
+            val target = entry.canonicalFile
             require(target.parentFile == parent.canonicalFile) { "Path escapes instance directory" }
             return target
         }

@@ -1,8 +1,10 @@
 package org.parallelnest.app.engine.virtualization
 
 import android.app.Application
+import android.Manifest
 import android.content.*
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.content.res.Resources
 import android.database.DatabaseErrorHandler
 import android.database.sqlite.SQLiteDatabase
@@ -11,7 +13,8 @@ import java.io.*
 
 internal class GuestContext(
     base: Context, private val root: File, private val guestInfo: ApplicationInfo,
-    private val loader: ClassLoader, private val guestResources: Resources
+    private val loader: ClassLoader, private val guestResources: Resources,
+    private val bluetooth: GuestBluetoothAccess? = null
 ) : ContextWrapper(base) {
     var guestApplication: Application? = null
     private val preferences = mutableMapOf<String, GuestPreferences>()
@@ -52,13 +55,31 @@ internal class GuestContext(
     override fun getFileStreamPath(name: String) = GuestStorage.child(filesDir, name)
     override fun deleteFile(name: String) = GuestStorage.child(filesDir, name).delete()
     override fun fileList() = filesDir.list().orEmpty()
-    override fun checkSelfPermission(permission: String) = GuestPermissionPolicy.decision(permission) ?: super.checkSelfPermission(permission)
-    override fun checkPermission(permission: String, pid: Int, uid: Int) = GuestPermissionPolicy.decision(permission) ?: super.checkPermission(permission, pid, uid)
-    override fun checkCallingOrSelfPermission(permission: String) = GuestPermissionPolicy.decision(permission) ?: super.checkCallingOrSelfPermission(permission)
-    override fun enforcePermission(permission: String, pid: Int, uid: Int, message: String?) {
-        check(GuestPermissionPolicy.decision(permission)==null) { "Guest permission bridge unsupported: $permission" }; super.enforcePermission(permission,pid,uid,message)
+    override fun checkSelfPermission(permission: String) = when {
+        bluetooth?.granted(permission, super.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) == true ->
+            PackageManager.PERMISSION_GRANTED
+        else -> GuestPermissionPolicy.decision(permission) ?: super.checkSelfPermission(permission)
     }
-    override fun getSystemService(name: String): Any? = if (name == LAYOUT_INFLATER_SERVICE) LayoutInflater.from(baseContext).cloneInContext(this) else super.getSystemService(name)
+    override fun checkPermission(permission: String, pid: Int, uid: Int) =
+        if (pid == android.os.Process.myPid() && uid == android.os.Process.myUid()) checkSelfPermission(permission)
+        else GuestPermissionPolicy.decision(permission) ?: super.checkPermission(permission, pid, uid)
+
+    override fun checkCallingOrSelfPermission(permission: String) =
+        checkPermission(permission, android.os.Binder.getCallingPid(), android.os.Binder.getCallingUid())
+
+    override fun enforcePermission(permission: String, pid: Int, uid: Int, message: String?) {
+        if (checkPermission(permission, pid, uid) != PackageManager.PERMISSION_GRANTED) {
+            throw SecurityException(message ?: "Guest permission denied: $permission")
+        }
+    }
+    override fun getSystemService(name: String): Any? = when (name) {
+        LAYOUT_INFLATER_SERVICE -> LayoutInflater.from(baseContext).cloneInContext(this)
+        BLUETOOTH_SERVICE -> if (checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+            // Use the platform service constructed with the genuine host context and attribution.
+            super.getSystemService(name)
+        } else null
+        else -> super.getSystemService(name)
+    }
     override fun startActivity(intent: Intent) { throw UnsupportedOperationException("Guest Activity routing is not supported by this prototype") }
     override fun startActivity(intent: Intent, options: android.os.Bundle?) { startActivity(intent) }
     override fun startService(service: Intent): ComponentName? = throw UnsupportedOperationException("Guest Services are not supported by this prototype")

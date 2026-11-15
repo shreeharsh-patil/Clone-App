@@ -64,7 +64,8 @@ private val icons=LruCache<String,Bitmap>(64)
     }
 }
 data class UiActions(val version: String,val debug: Boolean,val launch: (CloneInfo)->Unit,val original: (String)->Unit,
-    val bluetoothSettings: ()->Unit,val bluetoothPermissions: ()->Unit,val bluetoothShare: ()->Unit,val backup: ()->Unit,val restore: ()->Unit,val logs: ()->Unit,val repository: ()->Unit,val storage: ()->Unit,val shortcut: (CloneInfo)->Unit)
+    val bluetoothSettings: ()->Unit,val bluetoothPermissions: ()->Unit,val bluetoothShare: ()->Unit,val backup: ()->Unit,val restore: ()->Unit,val logs: ()->Unit,val repository: ()->Unit,val storage: ()->Unit,val shortcut: (CloneInfo)->Unit,
+    val securitySettings: ()->Unit = {})
 @Composable private fun Page(title: String,content: @Composable ColumnScope.()->Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) { Text(title,style=MaterialTheme.typography.headlineSmall);content() }
 }
@@ -117,8 +118,18 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
         Box(Modifier.fillMaxSize().padding(padding)) {
             NavHost(nav,startDestination="home") {
                 composable("home") {
-                    LazyVerticalGrid(columns=GridCells.Fixed(3),contentPadding=PaddingValues(16.dp),horizontalArrangement=Arrangement.spacedBy(10.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
-                        item(span={GridItemSpan(3)}) { Text(if(generalRuntime)"Experimental runtime · app compatibility varies" else "Test prototype · only Clone Apps Probe can be cloned",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant) }
+                    LazyVerticalGrid(columns=GridCells.Adaptive(104.dp),contentPadding=PaddingValues(16.dp),horizontalArrangement=Arrangement.spacedBy(10.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                        item(span={GridItemSpan(maxLineSpan)}) {
+                            Note("Separate apps and accounts",
+                                if (generalRuntime) "This build runs experimental virtual clones. Use Android Private Space for system-managed apps and accounts."
+                                else "Use Android Private Space or your phone’s built-in app cloning for everyday apps. The in-app runtime runs the Clone Apps Probe.") {
+                                TextButton(onClick = { nav.navigate("profiles") }) { Text("Separate app setup") }
+                            }
+                        }
+                        if (state.inactiveRuntimeCount > 0) item(span = { GridItemSpan(maxLineSpan) }) {
+                            Text("${state.inactiveRuntimeCount} saved clones require the other Clone Apps runtime build.",
+                                style = MaterialTheme.typography.bodyMedium)
+                        }
                         items(state.instances,key={it.id}) { row -> CloneTile(row,state.busy,{actions.launch(row)},{rename(row)},{vm.accent(row,(row.accent+1)%5)},{info(row)},{vm.info(row)},{delete=row}) }
                         item(key="add-app") { AddTile(enabled=!state.busy,onClick=::add) }
                     }
@@ -137,6 +148,7 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
                                     if(generalRuntime)"Select an app to attempt cloning. A clone is recorded after its guest Activity resumes. App features and device compatibility still need verification."
                                     else "This version can clone only the Clone Apps Probe test app. Other installed apps cannot be cloned with this runtime. Tap an unavailable app for its compatibility details.") {
                                     TextButton(onClick={nav.navigate("runtime")}){Text("View runtime support")}
+                                    TextButton(onClick={nav.navigate("profiles")}){Text("Separate app setup")}
                                 }
                             }
                             if(supported.isNotEmpty()) {
@@ -188,7 +200,8 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
                         DetailAction("Storage"){vm.info(row)}
                         Text(if(generalRuntime)"Guest data is stored under this instance's virtual user. APK code is shared between clones of the same version. Guests share Clone Apps' Android UID."
                             else "Guest data is stored under this instance UUID. Guests share Clone Apps' Android UID.",style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant)
-                        DetailAction("Update guest APK"){vm.update(row)}
+                        if (!generalRuntime) DetailAction("Update guest APK"){vm.update(row)}
+                        GuestBluetoothSection(row, vm, state, actions.bluetoothPermissions) { nav.navigate("profiles") }
                         DetailAction("Compatibility Check"){vm.diagnostics(row);nav.navigate("diagnostics")}
                         DetailAction("Delete Clone",true){delete=row}
                         TextButton(onClick={vm.freeze(row)},enabled=!state.busy){Text("Stop guest")}
@@ -199,9 +212,11 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
                 composable("settings") { Page("Settings") {
                     GroupTitle("General")
                     SettingsAction("Dark Theme",state.theme=="dark"){vm.theme("dark")}
+                    SettingsAction("Light Theme",state.theme=="light"){vm.theme("light")}
                     SettingsAction("System Theme",state.theme=="system"){vm.theme("system")}
                     SettingsAction("Refresh Apps"){vm.synchronize()}
                     SettingsAction("Clone Engine Status"){nav.navigate("runtime")}
+                    SettingsAction("Separate app setup"){nav.navigate("profiles")}
                     if(state.legacy.isNotEmpty())SettingsAction("Legacy work-profile recovery"){nav.navigate("legacy")}
                     SettingsAction("Bluetooth devices & file sharing"){nav.navigate("bluetooth")}
                     GroupTitle("Performance")
@@ -220,6 +235,21 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
                     Text("Historical work-profile records are preserved. Existing data stays in its Android profile; this prototype cannot import it. Resume an existing profile in Android settings before launching a legacy app.")
                     state.legacy.forEach { row -> OutlinedButton(onClick={vm.launchLegacy(row)},enabled=!state.busy,modifier=Modifier.fillMaxWidth()){Text("Open legacy ${row.name}")} }
                 } }
+                composable("profiles") { Page("Separate app setup") {
+                    Note("Android Private Space",
+                        if (android.os.Build.VERSION.SDK_INT >= 35)
+                            "On supported phones, open Security & privacy, then Private space. Set up a lock and optionally sign in with a different personal Google account. Unlock Private Space in your launcher and open its Play Store to install apps. Grant Nearby devices from inside each app when prompted."
+                        else "Android Private Space requires Android 15 or later. Check your phone’s built-in app cloning options below.") {
+                        if (android.os.Build.VERSION.SDK_INT >= 35)
+                            Button(onClick = actions.securitySettings) { Text("Open Android security settings") }
+                    }
+                    Note("Phone manufacturer options",
+                        "On supported Xiaomi, Redmi and POCO phones, search Android Settings for Dual apps. On Motorola, check Moto Secure for Secure Folder or search Settings for app cloning. Available apps and features depend on your phone’s software.")
+                    Note("Virtual clones",
+                        "Virtual clones share Clone Apps’ Android UID. Compatible apps may keep their own app-level sessions. Separate system Google accounts and Play Store installs use Android Private Space.")
+                    Note("Existing work profiles",
+                        "Work profiles are managed by Android. Clone Apps can open copies in its previously configured work profile from Settings. Private Space and the probe do not require work-profile setup.")
+                } }
                 composable("diagnostics") { Page("Diagnostics") {
                     Text(if(generalRuntime)state.runtime?.description.orEmpty() else "First-party Activity hosting supports files, preferences and SQLite. Hardware and background components have no guest bridges. Export diagnostics for runtime capabilities.",color=MaterialTheme.colorScheme.onSurfaceVariant)
                     state.instances.forEach { row -> OutlinedButton(onClick={vm.diagnostics(row)},enabled=!state.diagnosticBusy,modifier=Modifier.fillMaxWidth()){Text(row.name,maxLines=1,overflow=TextOverflow.Ellipsis)} }
@@ -234,7 +264,15 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
                     Note("Physical test limits","Hardware presence and read-only API checks do not prove capture, accessory connections, call routing, push delivery or third-party sign-in. Physical tests are not recorded for this build. Emulator observations remain separate from hardware acceptance.")
                     TextButton(onClick=actions.logs){Text("Export device diagnostics")}
                 } }
-                composable("bluetooth") { BluetoothScreen(actions.bluetoothSettings,actions.bluetoothPermissions,actions.bluetoothShare) }
+                composable("bluetooth") {
+                    if (generalRuntime) Page("Bluetooth") {
+                        Note("Android Bluetooth",
+                            "This experimental build uses Android settings for Bluetooth devices. Android handles file sharing.") {
+                            TextButton(onClick = actions.bluetoothSettings) { Text("Open Bluetooth settings") }
+                            TextButton(onClick = actions.bluetoothShare) { Text("Choose a file to send") }
+                        }
+                    } else BluetoothScreen(actions.bluetoothSettings, actions.bluetoothPermissions, actions.bluetoothShare)
+                }
                 composable("privacy") { Page("Privacy Policy") {
                     Note(if(generalRuntime)"Experimental app runtime" else "Offline manager",if(generalRuntime)"The experimental runtime has internet permission for guest apps. Guest apps keep their own network and privacy behavior. Automatic runtime log uploading is disabled."
                         else "No internet permission, account with us, analytics, ads or credential collection. Only the trusted first-party probe can run in this prototype.")

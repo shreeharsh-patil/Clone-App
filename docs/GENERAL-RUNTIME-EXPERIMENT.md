@@ -1,5 +1,9 @@
 # General app runtime experiment — 16 October 2026
 
+This page records the historical 0.4.0 and 0.4.1 experiment. For the current
+experimental build, application ID, permissions and acceptance status, see
+[Android runtime and Bluetooth repair](RUNTIME-REPAIR.md).
+
 ## Status
 
 The opt-in `generalRuntime` build replaces the cooperative probe host with an
@@ -16,12 +20,12 @@ the published build; this 0.4.1 candidate is not yet a public release.
 
 ## Build from source
 
-Use JDK 17, SDK/build tools 36, NDK 27.1.12297006, CMake 3.22.1, Python 3.12+,
+Use JDK 17, SDK/build tools 36, NDK 28.2.13676358, CMake 3.22.1, Python 3.12+,
 Git, and the repository's Rust toolchain. Set `JAVA_HOME` and `ANDROID_HOME`.
 On Windows:
 
 ```powershell
-.\scripts\build-rust.ps1
+.\scripts\build-rust.ps1 -Ndk "$env:ANDROID_HOME\ndk\28.2.13676358"
 python scripts/prepare-general-runtime-proof.py
 .\gradlew.bat -PgeneralRuntime=true :app:assembleDebug :app:assembleRelease
 ```
