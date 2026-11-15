@@ -18,6 +18,7 @@ PARSER.add_argument('--reboot', action='store_true')
 PARSER.add_argument('--host-update', action='store_true')
 PARSER.add_argument('--recovery-only', action='store_true')
 PARSER.add_argument('--guest-update-apk', type=Path)
+PARSER.add_argument('--ci-emulator', action='store_true', help='Enable setup for a disposable CI emulator.')
 PARSER.add_argument('--host-apk', type=Path, default=ROOT / 'app/build/outputs/apk/debug/app-debug.apk')
 PARSER.add_argument('--probe-apk', type=Path, default=ROOT / 'isolation-probe/build/outputs/apk/debug/isolation-probe-debug.apk')
 PARSER.add_argument('--test-apk', type=Path, default=ROOT / 'app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk')
@@ -50,21 +51,34 @@ def instrument(name, classes):
     print(f'{name}: ' + re.search(r'OK \(.*?\)', output).group(), flush=True)
 
 
-def wait_boot():
+def wait_boot(stage):
     end = time.monotonic() + 180
     while time.monotonic() < end:
         try:
             if adb('shell', 'getprop', 'sys.boot_completed', timeout=10).strip() == '1':
-                adb('shell', 'input', 'keyevent', '82')
-                return
+                if ARGS.ci_emulator and adb('shell', 'getprop', 'ro.kernel.qemu', timeout=10).strip() != '1':
+                    raise RuntimeError('CI setup requires an emulator')
+                # Injecting a key as the launcher is starting can cause a Launcher ANR.
+                adb('shell', 'wm', 'dismiss-keyguard', timeout=10)
+                break
         except (subprocess.SubprocessError, OSError):
             pass
         time.sleep(2)
-    raise RuntimeError('Device did not finish booting')
+    else:
+        raise RuntimeError('Device did not finish booting')
+
+    if ARGS.ci_emulator:
+        anr = adb('shell', 'dumpsys', 'window', 'lastanr', timeout=15)
+        if re.search(r'(?m)^\s*Application at fault:.*\bcom\.google\.android\.apps\.nexuslauncher/', anr):
+            (OUT / f'{stage}-pixel-launcher-anr.txt').write_text(anr, encoding='utf-8')
+            print(f'{stage}: restarting Pixel Launcher after Android reported its ANR', flush=True)
+            adb('shell', 'am', 'force-stop', '--user', '0', 'com.google.android.apps.nexuslauncher', timeout=10)
+        for setting in ('window_animation_scale', 'transition_animation_scale', 'animator_duration_scale'):
+            adb('shell', 'settings', 'put', 'global', setting, '0', timeout=10)
 
 
 try:
-    wait_boot()
+    wait_boot('initial-boot')
     actual = int(adb('shell', 'getprop', 'ro.build.version.sdk').strip())
     if actual != ARGS.api:
         raise RuntimeError(f'Expected API {ARGS.api}; connected device is API {actual}')
@@ -92,7 +106,7 @@ try:
     instrument('after-force-stop', ['VirtualRecoveryTest'])
     if ARGS.reboot:
         adb('reboot')
-        wait_boot()
+        wait_boot('reboot')
         instrument('after-reboot', ['VirtualRecoveryTest'])
     if ARGS.host_update:
         adb('install', '-r', '-t', str(host))

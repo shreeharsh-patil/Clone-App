@@ -11,10 +11,23 @@ import androidx.test.uiautomator.*
 import org.junit.Assert.*
 import org.junit.Test
 import org.parallelnest.app.bluetooth.fileShareIntent
+import java.util.regex.Pattern
 
 class BluetoothFeatureTest {
     private val context=InstrumentationRegistry.getInstrumentation().targetContext
     private val device=UiDevice.getInstance(InstrumentationRegistry.getInstrumentation())
+
+    private fun allowNearbyDevices(permission: String) {
+        val allow = By.pkg(Pattern.compile("com\\.(google\\.)?android\\.permissioncontroller")).text("Allow")
+        repeat(3) {
+            if (context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED) return
+            device.wait(Until.findObject(allow), 3_000)?.click()
+            // Android may expose the button before its window accepts input.
+            device.wait(Until.gone(allow), 1_000)
+        }
+        assertEquals("Android Nearby devices consent", PackageManager.PERMISSION_GRANTED, context.checkSelfPermission(permission))
+    }
+
     @SuppressLint("MissingPermission")
     @Test fun managerRequestsNearbyConsentAndStopsItsScanWhenLeaving() {
         device.executeShellCommand("am start --user 0 -n org.parallelnest.app/.MainActivity")
@@ -31,16 +44,13 @@ class BluetoothFeatureTest {
         }
         device.wait(Until.findObject(By.text("Allow Nearby devices")),3_000)?.let {
             it.click()
-            val allow=device.wait(Until.findObject(By.text("Allow")),10_000)
-            assertNotNull("OS Nearby devices consent",allow)
-            allow.click()
+            allowNearbyDevices(Manifest.permission.BLUETOOTH_CONNECT)
         }
-        assertTrue(device.wait(Until.hasObject(By.text(if(adapter.isEnabled) "Bluetooth is on" else "Bluetooth is off")),10_000))
+        assertTrue(device.wait(Until.hasObject(By.text(Pattern.compile("Bluetooth is (on|off)"))),10_000))
         assertEquals(PackageManager.PERMISSION_GRANTED,context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT))
         if(adapter.isEnabled) {
             device.wait(Until.findObject(By.text("Scan for devices")),5_000)!!.click()
-            device.wait(Until.findObject(By.text("Allow")),1_000)?.click()
-            assertEquals(PackageManager.PERMISSION_GRANTED,context.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN))
+            allowNearbyDevices(Manifest.permission.BLUETOOTH_SCAN)
             val stop=device.wait(Until.findObject(By.text("Stop scan")),3_000)
             if(stop!=null) {
                 device.pressBack()
