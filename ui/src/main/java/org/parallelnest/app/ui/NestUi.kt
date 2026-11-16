@@ -65,7 +65,7 @@ private val icons=LruCache<String,Bitmap>(64)
 }
 data class UiActions(val version: String,val debug: Boolean,val launch: (CloneInfo)->Unit,val original: (String)->Unit,
     val bluetoothSettings: ()->Unit,val bluetoothPermissions: ()->Unit,val bluetoothShare: ()->Unit,val backup: ()->Unit,val restore: ()->Unit,val logs: ()->Unit,val repository: ()->Unit,val storage: ()->Unit,val shortcut: (CloneInfo)->Unit,
-    val securitySettings: ()->Unit = {})
+    val securitySettings: ()->Unit = {}, val setupWorkProfile: ()->Unit)
 @Composable private fun Page(title: String,content: @Composable ColumnScope.()->Unit) {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) { Text(title,style=MaterialTheme.typography.headlineSmall);content() }
 }
@@ -122,7 +122,7 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
                         item(span={GridItemSpan(maxLineSpan)}) {
                             Note("Separate apps and accounts",
                                 if (generalRuntime) "This build runs experimental virtual clones. Use Android Private Space for system-managed apps and accounts."
-                                else "Use Android Private Space or your phone’s built-in app cloning for everyday apps. The in-app runtime runs the Clone Apps Probe.") {
+                                else "Use Add App to install a separate copy of an installed app through an Android work profile. Private Space and manufacturer options are also available.") {
                                 TextButton(onClick = { nav.navigate("profiles") }) { Text("Separate app setup") }
                             }
                         }
@@ -146,7 +146,7 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
                                 val noneAvailable=state.discoveryComplete && state.apps.none { it.supported }
                                 Note(if(!state.discoveryComplete)"Checking installed apps" else if(noneAvailable)"No supported apps installed" else if(generalRuntime)"Experimental app cloning" else "Limited app support",
                                     if(generalRuntime)"Select an app to attempt cloning. A clone is recorded after its guest Activity resumes. App features and device compatibility still need verification."
-                                    else "This version can clone only the Clone Apps Probe test app. Other installed apps cannot be cloned with this runtime. Tap an unavailable app for its compatibility details.") {
+                                    else "The in-app runtime supports the Clone Apps Probe. Select another installed app to install a separate copy through an Android work profile.") {
                                     TextButton(onClick={nav.navigate("runtime")}){Text("View runtime support")}
                                     TextButton(onClick={nav.navigate("profiles")}){Text("Separate app setup")}
                                 }
@@ -156,7 +156,7 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
                                 itemsIndexed(supported,key={_,a->"supported:${a.packageName}"}) { index,app -> DeviceAppRow(app,index,supported.size,state,vm){unavailable=it} }
                             }
                             if(unsupported.isNotEmpty()) {
-                                item { Text("Unavailable in this version",style=MaterialTheme.typography.titleMedium,modifier=Modifier.padding(top=20.dp,bottom=12.dp)) }
+                                item { Text("Separate copy options",style=MaterialTheme.typography.titleMedium,modifier=Modifier.padding(top=20.dp,bottom=12.dp)) }
                                 itemsIndexed(unsupported,key={_,a->"unsupported:${a.packageName}"}) { index,app -> DeviceAppRow(app,index,unsupported.size,state,vm){unavailable=it} }
                             }
                             if(apps.isEmpty() && state.discoveryComplete && !state.busy)item { Text("No installed apps match this search.",color=MaterialTheme.colorScheme.onSurfaceVariant,modifier=Modifier.padding(top=16.dp)) }
@@ -217,7 +217,7 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
                     SettingsAction("Refresh Apps"){vm.synchronize()}
                     SettingsAction("Clone Engine Status"){nav.navigate("runtime")}
                     SettingsAction("Separate app setup"){nav.navigate("profiles")}
-                    if(state.legacy.isNotEmpty())SettingsAction("Legacy work-profile recovery"){nav.navigate("legacy")}
+                    SettingsAction("Work profile copies"){nav.navigate("legacy")}
                     SettingsAction("Bluetooth devices & file sharing"){nav.navigate("bluetooth")}
                     GroupTitle("Performance")
                     SettingsAction("Diagnostics"){nav.navigate("diagnostics")}
@@ -231,14 +231,39 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
                     SettingsAction("Privacy Policy"){nav.navigate("privacy")}
                     SettingsAction("About Clone Apps"){nav.navigate("about")}
                 } }
-                composable("legacy") { Page("Legacy recovery") {
-                    Text("Historical work-profile records are preserved. Existing data stays in its Android profile; this prototype cannot import it. Resume an existing profile in Android settings before launching a legacy app.")
-                    state.legacy.forEach { row -> OutlinedButton(onClick={vm.launchLegacy(row)},enabled=!state.busy,modifier=Modifier.fillMaxWidth()){Text("Open legacy ${row.name}")} }
+                composable("legacy") { Page("Work profile copies") {
+                    if (state.workCopies.isEmpty()) Text("Work copies installed from Add App appear here.")
+                    state.workCopies.forEach { row ->
+                        OutlinedButton(onClick={vm.launchWorkCopy(row)},enabled=!state.busy && state.profile?.bridgeAvailable==true && !row.paused,modifier=Modifier.fillMaxWidth()) {
+                            Text(if (row.paused) "${row.name} · work profile paused" else "Open ${row.name}")
+                        }
+                    }
+                    WorkCopyStatus(state, actions.setupWorkProfile)
+                    if (state.profile?.bridgeAvailable==true) TextButton(onClick=vm::recoverWorkCopies,enabled=!state.busy) { Text("Recover interrupted installs") }
                 } }
+                composable("workinstall/{packageName}") { entry ->
+                    val pkg = entry.arguments?.getString("packageName")
+                    val app = state.apps.firstOrNull { it.packageName == pkg }
+                    val copy = state.workCopies.firstOrNull { it.packageName == pkg }
+                    LaunchedEffect(pkg) { if (!state.discoveryComplete) vm.discover() }
+                    Page(app?.let { "Separate copy of ${it.label}" } ?: "Install separate copy") {
+                        Text("Android installs this app in a work profile with fresh app data and its own sign-in. You can keep using the personal copy.")
+                        if (state.busy) LinearProgressIndicator(Modifier.fillMaxWidth())
+                        WorkCopyStatus(state, actions.setupWorkProfile)
+                        if (state.profile?.bridgeAvailable == true && app != null) {
+                            if (copy == null) {
+                                Button(onClick={vm.installWorkCopy(app)},enabled=!state.busy) { Text("Install in work profile") }
+                            } else {
+                                Button(onClick={vm.launchWorkCopy(copy)},enabled=!state.busy && !copy.paused) { Text("Open work copy") }
+                            }
+                        }
+                        TextButton(onClick={nav.navigate("profiles")}) { Text("Private Space and phone options") }
+                    }
+                }
                 composable("profiles") { Page("Separate app setup") {
                     Note("Android Private Space",
                         if (android.os.Build.VERSION.SDK_INT >= 35)
-                            "On supported phones, open Security & privacy, then Private space. Set up a lock and optionally sign in with a different personal Google account. Unlock Private Space in your launcher and open its Play Store to install apps. Grant Nearby devices from inside each app when prompted."
+                            "Open Security & privacy → Private space. After setup, unlock it in All Apps and tap Install to use its Play Store. On supported launchers, you can also long-press an app and choose Install app in Private space."
                         else "Android Private Space requires Android 15 or later. Check your phone’s built-in app cloning options below.") {
                         if (android.os.Build.VERSION.SDK_INT >= 35)
                             Button(onClick = actions.securitySettings) { Text("Open Android security settings") }
@@ -247,8 +272,10 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
                         "On supported Xiaomi, Redmi and POCO phones, search Android Settings for Dual apps. On Motorola, check Moto Secure for Secure Folder or search Settings for app cloning. Available apps and features depend on your phone’s software.")
                     Note("Virtual clones",
                         "Virtual clones share Clone Apps’ Android UID. Compatible apps may keep their own app-level sessions. Separate system Google accounts and Play Store installs use Android Private Space.")
-                    Note("Existing work profiles",
-                        "Work profiles are managed by Android. Clone Apps can open copies in its previously configured work profile from Settings. Private Space and the probe do not require work-profile setup.")
+                    Note("Optional work profile",
+                        "Clone Apps can install one additional copy per app into its own work profile. Android asks you to review the profile setup. Setup can be skipped if you use Private Space, your phone’s cloning feature, or the probe.") {
+                        TextButton(onClick={nav.navigate("legacy")}) { Text("Work profile copies") }
+                    }
                 } }
                 composable("diagnostics") { Page("Diagnostics") {
                     Text(if(generalRuntime)state.runtime?.description.orEmpty() else "First-party Activity hosting supports files, preferences and SQLite. Hardware and background components have no guest bridges. Export diagnostics for runtime capabilities.",color=MaterialTheme.colorScheme.onSurfaceVariant)
@@ -303,7 +330,25 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
     }
     rename?.let { row -> AlertDialog(onDismissRequest={rename=null},title={Text("Rename Clone")},text={OutlinedTextField(name,{name=it.take(80)},singleLine=true,label={Text("Display name")})},confirmButton={TextButton(onClick={vm.rename(row,name);rename=null},enabled=name.isNotBlank() && !state.busy){Text("Save")}},dismissButton={TextButton(onClick={rename=null}){Text("Cancel")}}) }
     delete?.let { row -> AlertDialog(onDismissRequest={delete=null},title={Text("Delete ${row.name}?")},text={Text(if(generalRuntime)"This permanently deletes this clone's private data. Shared APK code is removed after its last clone is deleted. Other instances and the original app are preserved." else "This permanently deletes only this guest instance's files, preferences, databases and APK. Other instances and the original app are preserved.")},confirmButton={TextButton(onClick={vm.delete(row);delete=null},enabled=!state.busy){Text("Delete Clone")}},dismissButton={TextButton(onClick={delete=null}){Text("Cancel")}}) }
-    unavailable?.let { app -> AlertDialog(onDismissRequest={unavailable=null},title={Text("Cannot clone ${app.label}")},text={Text(app.reason)},confirmButton={TextButton(onClick={unavailable=null}){Text("OK")}}) }
+    unavailable?.let { app ->
+        AlertDialog(
+            onDismissRequest={unavailable=null},
+            title={Text("${app.label} copy options")},
+            text={Text(app.reason)},
+            confirmButton={TextButton(onClick={unavailable=null; nav.navigate("workinstall/${app.packageName}")}) { Text("Install separate copy") }},
+            dismissButton={TextButton(onClick={unavailable=null}) { Text("Cancel") }}
+        )
+    }
+}
+
+@Composable private fun WorkCopyStatus(state: NestState, setup: () -> Unit) {
+    val profile = state.profile ?: return
+    if (profile.bridgeAvailable) return
+    Text(profile.description)
+    if (profile.canProvision) {
+        Text("Clone Apps manages this profile. Android shows the permissions and asks for your consent before creating it.")
+        Button(onClick=setup,enabled=!state.busy) { Text("Set up work profile") }
+    }
 }
 
 @Composable private fun GradientInstall(count: Int,enabled: Boolean,onClick: ()->Unit) {
@@ -319,7 +364,7 @@ data class UiActions(val version: String,val debug: Boolean,val launch: (CloneIn
             AppIcon(app.packageName)
             Column(Modifier.weight(1f)){Text(app.label,maxLines=1,overflow=TextOverflow.Ellipsis);Text(if(!app.supported)app.reason else app.packageName,style=MaterialTheme.typography.bodySmall,color=MaterialTheme.colorScheme.onSurfaceVariant,maxLines=2,overflow=TextOverflow.Ellipsis)}
             if(app.supported)Checkbox(app.packageName in state.selection,onCheckedChange={vm.select(app.packageName)},enabled=enabled)
-            else Text("Details",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.primary)
+            else Text("Copy options",style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.primary)
         }
         if(index<total-1)HorizontalDivider(Modifier.padding(start=68.dp),color=MaterialTheme.colorScheme.outlineVariant)
     }
