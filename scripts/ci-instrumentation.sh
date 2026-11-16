@@ -18,7 +18,7 @@ fi
 "$emulator" -list-avds | grep -Fx "$avd"
 
 "$emulator" -avd "$avd" -port 5554 -no-window -noaudio -no-snapshot -no-boot-anim \
-    -gpu swiftshader_indirect -memory 4096 -cores 2 > build/device-evidence/emulator.log 2>&1 &
+    -gpu swiftshader -memory 4096 -cores 2 > build/device-evidence/emulator.log 2>&1 &
 emulator_pid=$!
 collect_diagnostics() {
     timeout 30 adb -s "$serial" logcat -d > build/device-evidence/runtime.log 2>&1 || true
