@@ -17,7 +17,7 @@ internal class GuestTestDriver {
     val nest get() = context.applicationContext as NestApplication
     val device = UiDevice.getInstance(instrumentation)
     fun visible() { assertTrue("Guest APK's own UI must be visible", device.wait(Until.hasObject(By.text("Actual Guest Probe Activity")), 15000)) }
-    fun save(value: String) {
+    fun save(value: String, dismissKeyboard: Boolean = true) {
         android.util.Log.i("GuestTest", "save $value: waiting for UI")
         visible()
         val input = device.wait(Until.findObject(By.clazz("android.widget.EditText")), 10000) ?: error("Missing guest input")
@@ -28,7 +28,7 @@ internal class GuestTestDriver {
         save.click()
         android.util.Log.i("GuestTest", "save $value: clicked")
         assertTrue(device.wait(Until.hasObject(By.text("Saved: $value")), 10000))
-        device.pressBack() // hide IME, if present; lifecycle is also checked by stop below
+        if (dismissKeyboard) device.pressBack()
         android.util.Log.i("GuestTest", "save $value: done")
     }
     fun assertStored(row: CloneInfo, value: String) {
@@ -59,12 +59,12 @@ class VirtualRuntimeTest {
             "am start -W -n ${GuestPackageManager.PROBE}/${GuestPackageManager.ENTRY}"
         )
         assertTrue(originalLaunch, originalLaunch.lineSequence().any { it.trim() == "Status: ok" })
-        test.save("ORIGINAL_SENTINEL")
-        // Wait for a quiescent standalone fixture before byte-for-byte comparisons.
-        // Its own final stop/destroy callbacks can otherwise race the baseline read.
+        // Keep the original in the foreground after its save commits. Pressing Back first can
+        // start another preferences write in the teardown callbacks before the force-stop.
+        test.save("ORIGINAL_SENTINEL", dismissKeyboard = false)
         test.device.executeShellCommand("am force-stop org.parallelnest.probe")
         val originalBefore = test.original()
-        assertTrue(originalBefore.contains("ORIGINAL_SENTINEL"))
+        assertTrue("Standalone probe preferences must retain the saved value", originalBefore.contains("ORIGINAL_SENTINEL"))
         val app = engine.listSupportedApps().single { it.packageName==GuestPackageManager.PROBE }
         assertTrue(app.reason, app.supported)
         val first = engine.createInstance(app, "Probe one")
