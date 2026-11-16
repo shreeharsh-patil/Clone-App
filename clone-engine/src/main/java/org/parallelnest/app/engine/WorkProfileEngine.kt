@@ -45,6 +45,19 @@ class WorkProfileEngine(private val context: Context, private val registry: Regi
         }
         return ProfileState(managed, supported, provision, others, bridge, reason)
     }
+    fun provisioningIntent(): Intent {
+        val profile = legacyStatus()
+        check(profile.canProvision) { profile.description }
+        val intent = Intent(DevicePolicyManager.ACTION_PROVISION_MANAGED_PROFILE)
+        check(intent.resolveActivity(pm) != null) { "Android profile setup is unavailable on this device" }
+        val store = SecureStore(context)
+        val key = store.get("bridge") ?: store.newBridgeKey()
+        return intent.putExtra(DevicePolicyManager.EXTRA_PROVISIONING_DEVICE_ADMIN_COMPONENT_NAME, admin(context))
+            .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_ALLOW_OFFLINE, true)
+            .putExtra(DevicePolicyManager.EXTRA_PROVISIONING_ADMIN_EXTRAS_BUNDLE, PersistableBundle().apply {
+                putString("bridge-key", android.util.Base64.encodeToString(key, android.util.Base64.NO_WRAP))
+            })
+    }
     override suspend fun listSupportedApps(): List<AppInfo> = withContext(Dispatchers.IO) {
         pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), PackageManager.ResolveInfoFlags.of(0)).map { it.activityInfo.applicationInfo }.distinctBy { it.packageName }.filter { it.packageName != context.packageName }.map { app ->
             val paths = listOf(app.sourceDir) + app.splitSourceDirs.orEmpty()
@@ -86,9 +99,9 @@ class WorkProfileEngine(private val context: Context, private val registry: Regi
         if (reply.getBooleanExtra("success", false)) {
             val serial = reply.getLongExtra("profile", -1)
             check(serial >= 0) { "Installer returned no profile identifier" }
-            progress(CreationStage.REGISTERED)
             progress(CreationStage.VERIFYING)
             check(getInstances().any { it.packageName==app.packageName && it.profile==serial }) { "Android installed the app, but it is not yet available. Refresh Apps to recover it." }
+            progress(CreationStage.REGISTERED)
         }
         result(reply)
     }
@@ -103,15 +116,13 @@ class WorkProfileEngine(private val context: Context, private val registry: Regi
         if (reply.getBooleanExtra("success", false)) registry.update { it.filterNot { row -> row.id == instance.id } }
         return result(reply)
     }
-    suspend fun adoptProfileApps(): OperationResult {
+    suspend fun recoverPendingCreations(): OperationResult {
         val reply = request("list")
         if (!reply.getBooleanExtra("success", false)) return result(reply)
         val serial = reply.getLongExtra("profile", -1)
         val packages = reply.getStringArrayListExtra("packages").orEmpty()
-        val labels = reply.getStringArrayListExtra("labels").orEmpty()
         registry.reconcileCreations(packages.toSet(),serial)
-        registry.update { old -> old + packages.mapIndexedNotNull { i, pkg -> if (old.any { it.engine == "work_profile" && it.packageName == pkg && it.profile == serial }) null else CloneInfo(UUID.randomUUID().toString(), pkg, labels.getOrElse(i) { pkg }.take(80), serial, System.currentTimeMillis()) } }
-        return OperationResult(true, "Installed work apps synchronized")
+        return OperationResult(true, "Work-profile copies refreshed")
     }
     override suspend fun getInstances(): List<CloneInfo> = withContext(Dispatchers.IO) {
         val profiles = users.userProfiles.filter { it != Process.myUserHandle() }.associateBy { users.getSerialNumberForUser(it) }

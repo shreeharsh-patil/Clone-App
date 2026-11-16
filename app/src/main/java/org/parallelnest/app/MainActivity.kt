@@ -23,6 +23,10 @@ import org.parallelnest.app.bluetooth.fileShareIntent
 
 class MainActivity: ComponentActivity() {
     private val vm by viewModels<NestViewModel>()
+    private val provisionWorkProfile = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode != RESULT_OK) vm.report("Android cancelled or declined work-profile setup.")
+        vm.refresh()
+    }
     private val backup=registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri -> uri?.let {
         lifecycleScope.launch { try {
             withContext(Dispatchers.IO) { contentResolver.openOutputStream(it)?.use { stream -> stream.write(vm.registry.backup().toByteArray()) } ?: error("Could not write document") }
@@ -71,6 +75,7 @@ class MainActivity: ComponentActivity() {
                     bluetoothSettings={openSettings(Settings.ACTION_BLUETOOTH_SETTINGS)},
                     bluetoothPermissions={openSettings(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,true)},
                     securitySettings={openSettings(Settings.ACTION_SECURITY_SETTINGS)},
+                    setupWorkProfile=::setupWorkProfile,
                     bluetoothShare={bluetoothFile.launch(arrayOf("*/*"))},
                     backup={backup.launch("clone-apps-metadata.json")},restore={restore.launch(arrayOf("application/json"))},logs={diagnostics.launch("clone-apps-diagnostics.txt")},
                     repository={runCatching { startActivity(Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://github.com/shreeharsh-patil/Clone-App"))) }.onFailure { vm.report("No browser is available") }},
@@ -79,6 +84,18 @@ class MainActivity: ComponentActivity() {
             }
         }
         if(savedInstanceState==null)handleShortcut()
+    }
+    private fun setupWorkProfile() {
+        lifecycleScope.launch {
+            try {
+                val intent = withContext(Dispatchers.IO) { vm.profileEngine.provisioningIntent() }
+                provisionWorkProfile.launch(intent)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                vm.report(error.message ?: "Android work-profile setup is unavailable.")
+            }
+        }
     }
     private fun openSettings(action: String,app: Boolean=false) {
         runCatching {

@@ -25,7 +25,8 @@ object AppCatalog {
 }
 data class CreationState(val current: AppInfo?=null,val stage: String="Checking compatibility",val total: Int=0,val finished: Int=0,val running: Boolean=false,val outcomes: List<String> = emptyList(),val cancelRemaining: Boolean=false)
 data class NestState(val runtime: EngineState?=null,val instances: List<CloneInfo> = emptyList(),val apps: List<AppInfo> = emptyList(),val busy: Boolean=false,val message: String?=null,val discoveryComplete: Boolean=false,
-    val theme: String="dark",val selection: List<String> = emptyList(),val query: String="",val creation: CreationState=CreationState(),val report: CompatibilityReport?=null,val diagnosticBusy: Boolean=false,val legacy: List<CloneInfo> = emptyList(),
+    val theme: String="dark",val selection: List<String> = emptyList(),val query: String="",val creation: CreationState=CreationState(),val report: CompatibilityReport?=null,val diagnosticBusy: Boolean=false,
+    val profile: ProfileState? = null, val workCopies: List<CloneInfo> = emptyList(),
     val inactiveRuntimeCount: Int = 0, val bluetoothRevision: Int = 0)
 class NestViewModel(app: Application,private val saved: SavedStateHandle): AndroidViewModel(app) {
     private val nest=app as NestServices
@@ -43,7 +44,7 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
         } }
         viewModelScope.launch { registry.settings.catch { report("Unable to read preferences: ${it.message}") }.collect { p -> mutable.update { it.copy(theme=p[stringPreferencesKey("theme")] ?: "dark") } } }
         viewModelScope.launch { registry.instances.catch { report("Unable to read metadata: ${it.message}") }.collect { refresh() } }
-        viewModelScope.launch(Dispatchers.IO) { try { if(registry.pendingCreations().isNotEmpty()) report("An installation was interrupted. Refresh Apps to recover any completed work copies.") } catch(e:CancellationException){throw e}catch(e:Throwable){report(e.message ?: "Metadata recovery failed")} }
+        viewModelScope.launch(Dispatchers.IO) { try { if(registry.pendingCreations().isNotEmpty()) report("An installation was interrupted. Open Work profile copies to recover it.") } catch(e:CancellationException){throw e}catch(e:Throwable){report(e.message ?: "Metadata recovery failed")} }
         refresh()
     }
     fun refresh() { viewModelScope.launch(Dispatchers.IO) {
@@ -51,9 +52,11 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
             val runtime = engine.status()
             val rows = engine.getInstances()
             val savedRows = registry.snapshot()
+            val profile = profileEngine.legacyStatus()
+            val workCopies = profileEngine.getInstances()
             val compatibility = if (runtime.type == "general_experimental") runtime.type else VirtualContainerEngine.COMPATIBILITY
             mutable.update { it.copy(runtime = runtime, instances = rows,
-                legacy = savedRows.filter { row -> row.engine == "work_profile" },
+                profile = profile, workCopies = workCopies,
                 inactiveRuntimeCount = savedRows.count { row -> row.engine == "virtual" && row.compatibility != compatibility }) }
         }
         catch(e:CancellationException){throw e}catch(e:Throwable){report(e.message ?: "Could not read instances")}
@@ -124,7 +127,15 @@ class NestViewModel(app: Application,private val saved: SavedStateHandle): Andro
             }
         }
     }
-    fun launchLegacy(row: CloneInfo) { viewModelScope.launch { runOperation { profileEngine.launchInstance(row) } } }
+    fun installWorkCopy(app: AppInfo) {
+        viewModelScope.launch { runOperation { profileEngine.createInstance(app, app.label.take(80)) } }
+    }
+    fun launchWorkCopy(row: CloneInfo) {
+        viewModelScope.launch { runOperation { profileEngine.launchInstance(row) } }
+    }
+    fun recoverWorkCopies() {
+        viewModelScope.launch { runOperation { profileEngine.recoverPendingCreations() } }
+    }
     fun theme(value: String) { viewModelScope.launch { registry.textSetting("theme",value) } }
     fun diagnostics(row: CloneInfo) {
         if(row.engine=="virtual") { report(engine.status().description + "\nInstance: ${row.runtime}");return }
