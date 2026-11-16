@@ -24,7 +24,8 @@ The in-app runtimes share Clone Apps’ Android UID. Android Private Space suppl
 1. Install the app from Google Play in your personal profile.
 2. In Clone Apps, tap **Add App**, select that app, and tap **Install separate copy**.
 3. Select **Set up work profile** if prompted. Review Android’s profile setup, return to Clone Apps, and tap **Install in work profile**.
-4. Select **Open work copy**, or open it later under **Settings → Work profile copies**.
+4. If Android asks, open **Settings**, select **Allow from this source** for the work-badged Clone Apps, and return to Android’s **Install** prompt.
+5. Select **Open work copy**, or open it later under **Settings → Work profile copies**.
 
 The work copy starts with fresh app data. You can sign in inside the copy as the app allows. If Android blocks a new work profile, use the **Private Space and phone options** guide. On supported Android 15 and newer phones, unlock Private Space in All Apps and tap **Install** to use its Play Store.
 
