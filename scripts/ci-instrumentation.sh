@@ -3,10 +3,21 @@ set -euo pipefail
 api="${1:?API argument required}"
 serial=emulator-5554
 avd="clone-apps-ci-$api"
+ANDROID_AVD_HOME=$(mktemp -d "${RUNNER_TEMP:-/tmp}/clone-apps-avds.XXXXXX")
+export ANDROID_AVD_HOME
+avd_dir="$ANDROID_AVD_HOME/$avd.avd"
+emulator="$ANDROID_HOME/emulator/emulator"
 mkdir -p build/device-evidence
-echo no | avdmanager create avd --name "$avd" --package "system-images;android-$api;google_apis;x86_64" --device pixel_7
+echo no | avdmanager create avd --name "$avd" --path "$avd_dir" \
+    --package "system-images;android-$api;google_apis;x86_64" --device pixel_7
+test -s "$avd_dir/config.ini"
+# Some command-line tools register the AVD in their own preferences directory.
+if [ ! -f "$ANDROID_AVD_HOME/$avd.ini" ]; then
+    printf 'avd.ini.encoding=UTF-8\npath=%s\ntarget=android-%s\n' "$avd_dir" "$api" > "$ANDROID_AVD_HOME/$avd.ini"
+fi
+"$emulator" -list-avds | grep -Fx "$avd"
 
-"$ANDROID_HOME/emulator/emulator" -avd "$avd" -port 5554 -no-window -noaudio -no-snapshot -no-boot-anim \
+"$emulator" -avd "$avd" -port 5554 -no-window -noaudio -no-snapshot -no-boot-anim \
     -gpu swiftshader_indirect -memory 4096 -cores 2 > build/device-evidence/emulator.log 2>&1 &
 emulator_pid=$!
 collect_diagnostics() {
